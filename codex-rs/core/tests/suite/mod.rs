@@ -110,3 +110,4 @@ mod view_image;
 mod web_search;
 mod websocket_fallback;
 mod window_headers;
+mod zen_provider_tests;
