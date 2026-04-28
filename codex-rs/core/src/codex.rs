@@ -1605,6 +1605,12 @@ impl Session {
             sandbox_policy: session_configuration.sandbox_policy.get(),
             windows_sandbox_level: session_configuration.windows_sandbox_level,
         })
+        .with_no_tools(
+            session_configuration
+                .collaboration_mode
+                .mode
+                .suppresses_tools(),
+        )
         .with_unified_exec_shell_mode_for_session(
             crate::tools::spec::tool_user_shell_type(user_shell),
             shell_zsh_path,

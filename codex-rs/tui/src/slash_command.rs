@@ -31,6 +31,7 @@ pub enum SlashCommand {
     Init,
     Compact,
     Plan,
+    Ask,
     Collab,
     Agent,
     // Undo,
@@ -101,6 +102,7 @@ impl SlashCommand {
             SlashCommand::Realtime => "toggle realtime voice mode (experimental)",
             SlashCommand::Settings => "configure realtime microphone/speaker",
             SlashCommand::Plan => "switch to Plan mode",
+            SlashCommand::Ask => "ask a question without running any tools",
             SlashCommand::Collab => "change collaboration mode (experimental)",
             SlashCommand::Agent | SlashCommand::MultiAgents => "switch the active agent thread",
             SlashCommand::Approvals => "choose what Codex is allowed to do",
@@ -159,6 +161,7 @@ impl SlashCommand {
             | SlashCommand::Memories
             | SlashCommand::Review
             | SlashCommand::Plan
+            | SlashCommand::Ask
             | SlashCommand::Clear
             | SlashCommand::Logout
             | SlashCommand::MemoryDrop

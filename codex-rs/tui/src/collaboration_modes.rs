@@ -60,3 +60,7 @@ pub(crate) fn default_mode_mask(model_catalog: &ModelCatalog) -> Option<Collabor
 pub(crate) fn plan_mask(model_catalog: &ModelCatalog) -> Option<CollaborationModeMask> {
     mask_for_kind(model_catalog, ModeKind::Plan)
 }
+
+pub(crate) fn ask_mask(model_catalog: &ModelCatalog) -> Option<CollaborationModeMask> {
+    mask_for_kind(model_catalog, ModeKind::Ask)
+}

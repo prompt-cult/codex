@@ -53,6 +53,26 @@ impl ChatWidget {
         }
     }
 
+    fn apply_ask_slash_command(&mut self) -> bool {
+        if !self.collaboration_modes_enabled() {
+            self.add_info_message(
+                "Collaboration modes are disabled.".to_string(),
+                Some("Enable collaboration modes to use /ask.".to_string()),
+            );
+            return false;
+        }
+        if let Some(mask) = collaboration_modes::ask_mask(self.model_catalog.as_ref()) {
+            self.set_collaboration_mask(mask);
+            true
+        } else {
+            self.add_info_message(
+                "Ask mode unavailable right now.".to_string(),
+                /*hint*/ None,
+            );
+            false
+        }
+    }
+
     pub(super) fn dispatch_command(&mut self, cmd: SlashCommand) {
         if !cmd.available_during_task() && self.bottom_pane.is_task_running() {
             let message = format!(
@@ -150,6 +170,9 @@ impl ChatWidget {
             }
             SlashCommand::Plan => {
                 self.apply_plan_slash_command();
+            }
+            SlashCommand::Ask => {
+                self.apply_ask_slash_command();
             }
             SlashCommand::Collab => {
                 if !self.collaboration_modes_enabled() {
@@ -449,6 +472,36 @@ impl ChatWidget {
             }
             SlashCommand::Plan if !trimmed.is_empty() => {
                 if !self.apply_plan_slash_command() {
+                    return;
+                }
+                let Some((prepared_args, prepared_elements)) = self
+                    .bottom_pane
+                    .prepare_inline_args_submission(/*record_history*/ false)
+                else {
+                    return;
+                };
+                let local_images = self
+                    .bottom_pane
+                    .take_recent_submission_images_with_placeholders();
+                let remote_image_urls = self.take_remote_image_urls();
+                let user_message = UserMessage {
+                    text: prepared_args,
+                    local_images,
+                    remote_image_urls,
+                    text_elements: prepared_elements,
+                    mention_bindings: self.bottom_pane.take_recent_submission_mention_bindings(),
+                };
+                if self.is_session_configured() {
+                    self.reasoning_buffer.clear();
+                    self.full_reasoning_buffer.clear();
+                    self.set_status_header(String::from("Working"));
+                    self.submit_user_message(user_message);
+                } else {
+                    self.queue_user_message(user_message);
+                }
+            }
+            SlashCommand::Ask if !trimmed.is_empty() => {
+                if !self.apply_ask_slash_command() {
                     return;
                 }
                 let Some((prepared_args, prepared_elements)) = self

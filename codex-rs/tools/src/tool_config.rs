@@ -112,6 +112,9 @@ pub struct ToolsConfig {
     pub agent_jobs_tools: bool,
     pub agent_jobs_worker_tools: bool,
     pub agent_type_description: String,
+    /// When `true`, no tools are sent to the model. Used by Ask mode to
+    /// enforce a pure Q&A turn with zero tool-call overhead.
+    pub no_tools: bool,
 }
 
 pub struct ToolsConfigParams<'a> {
@@ -233,6 +236,7 @@ impl ToolsConfig {
             agent_jobs_tools: include_agent_jobs,
             agent_jobs_worker_tools,
             agent_type_description: String::new(),
+            no_tools: false,
         }
     }
 
@@ -294,6 +298,11 @@ impl ToolsConfig {
 
     pub fn with_web_search_config(mut self, web_search_config: Option<WebSearchConfig>) -> Self {
         self.web_search_config = web_search_config;
+        self
+    }
+
+    pub fn with_no_tools(mut self, no_tools: bool) -> Self {
+        self.no_tools = no_tools;
         self
     }
 

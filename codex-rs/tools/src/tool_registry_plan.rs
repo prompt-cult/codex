@@ -70,6 +70,12 @@ pub fn build_tool_registry_plan(
     params: ToolRegistryPlanParams<'_>,
 ) -> ToolRegistryPlan {
     let mut plan = ToolRegistryPlan::new();
+
+    // Ask mode: send zero tools — pure Q&A, no tool-call round-trips.
+    if config.no_tools {
+        return plan;
+    }
+
     let exec_permission_approvals_enabled = config.exec_permission_approvals_enabled;
 
     if config.code_mode_enabled {

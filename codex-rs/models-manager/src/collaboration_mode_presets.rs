@@ -1,3 +1,4 @@
+use codex_collaboration_mode_templates::ASK as COLLABORATION_MODE_ASK;
 use codex_collaboration_mode_templates::DEFAULT as COLLABORATION_MODE_DEFAULT;
 use codex_collaboration_mode_templates::PLAN as COLLABORATION_MODE_PLAN;
 use codex_protocol::config_types::CollaborationModeMask;
@@ -29,7 +30,11 @@ pub struct CollaborationModesConfig {
 pub fn builtin_collaboration_mode_presets(
     collaboration_modes_config: CollaborationModesConfig,
 ) -> Vec<CollaborationModeMask> {
-    vec![plan_preset(), default_preset(collaboration_modes_config)]
+    vec![
+        plan_preset(),
+        ask_preset(),
+        default_preset(collaboration_modes_config),
+    ]
 }
 
 fn plan_preset() -> CollaborationModeMask {
@@ -39,6 +44,16 @@ fn plan_preset() -> CollaborationModeMask {
         model: None,
         reasoning_effort: Some(Some(ReasoningEffort::Medium)),
         developer_instructions: Some(Some(COLLABORATION_MODE_PLAN.to_string())),
+    }
+}
+
+fn ask_preset() -> CollaborationModeMask {
+    CollaborationModeMask {
+        name: ModeKind::Ask.display_name().to_string(),
+        mode: Some(ModeKind::Ask),
+        model: None,
+        reasoning_effort: None,
+        developer_instructions: Some(Some(COLLABORATION_MODE_ASK.to_string())),
     }
 }
 
