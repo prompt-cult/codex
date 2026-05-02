@@ -219,43 +219,31 @@ async fn zen_provider_base_url() -> Result<()> {
     Ok(())
 }
 
-/// Test loading actual config.toml with zen provider.
+/// Test parsing a config.toml snippet with a zen provider.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn zen_provider_loads_from_file() -> Result<()> {
-    use codex_config::CONFIG_TOML_FILE;
-    use std::path::PathBuf;
+    let content = r#"
+model = "gpt-5.4"
+model_provider = "zen"
 
-    // Try to load actual config from ~/codex-local/config.toml
-    let config_path = PathBuf::from("/Users/Shared/codex-local/config.toml");
+[model_providers.zen]
+name = "Zen"
+base_url = "https://opencode.ai/zen/v1"
+env_key = "OPENCODE_API_KEY"
+requires_openai_auth = false
+wire_api = "responses"
+"#;
 
-    if config_path.exists() {
-        let content = std::fs::read_to_string(&config_path)?;
+    let config: codex_config::config_toml::ConfigToml = toml::from_str(content)?;
+    let zen = config
+        .model_providers
+        .get("zen")
+        .ok_or_else(|| anyhow::anyhow!("zen provider not found in config"))?;
 
-        // Parse the config
-        let config: codex_config::config_toml::ConfigToml = toml::from_str(&content)
-            .map_err(|e| anyhow::anyhow!("Failed to parse config: {}", e))?;
-
-        // Check zen provider exists
-        let zen = config
-            .model_providers
-            .get("zen")
-            .ok_or_else(|| anyhow::anyhow!("zen provider not found in config"))?;
-
-        println!(
-            "Loaded zen provider: name={}, base_url={:?}, env_key={:?}, requires_openai_auth={}",
-            zen.name, zen.base_url, zen.env_key, zen.requires_openai_auth
-        );
-
-        // Verify zen provider is correct
-        assert_eq!(zen.name, "Zen");
-        assert_eq!(zen.base_url.as_ref().unwrap(), "https://opencode.ai/zen/v1");
-        assert_eq!(zen.env_key.as_ref().unwrap(), "OPENCODE_API_KEY");
-        assert!(!zen.requires_openai_auth);
-
-        println!("SUCCESS: zen provider loaded correctly from config file!");
-    } else {
-        eprintln!("Skipping: config file not found at {:?}", config_path);
-    }
+    assert_eq!(zen.name, "Zen");
+    assert_eq!(zen.base_url.as_ref().unwrap(), "https://opencode.ai/zen/v1");
+    assert_eq!(zen.env_key.as_ref().unwrap(), "OPENCODE_API_KEY");
+    assert!(!zen.requires_openai_auth);
 
     Ok(())
 }

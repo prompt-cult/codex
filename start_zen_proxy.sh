@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+#!/bin/sh
+# shellcheck disable=SC2012,SC1090
 # start_zen_proxy.sh — start, stop, restart, or check status of zen_proxy
 #
 # Usage:
@@ -9,25 +10,58 @@
 #   ./start_zen_proxy.sh logs     — tail the log file
 #   ./start_zen_proxy.sh fg       — run in foreground (for debugging)
 
-set -euo pipefail
+set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROXY_SCRIPT="$SCRIPT_DIR/zen_proxy.py"
 PID_FILE="/tmp/zen_proxy.pid"
 LOG_FILE="/tmp/zen_proxy.log"
 ENV_FILE="$SCRIPT_DIR/.env"
 PORT="${ZEN_PROXY_PORT:-9099}"
 
+_check_env_file() {
+    env_file="$1"
+    if [ ! -f "$env_file" ]; then
+        return 0
+    fi
+
+    # Check permissions using portable method
+    perms=$(ls -l "$env_file" 2>/dev/null | awk '{print $1}' | cut -c1-10)
+    case "$perms" in
+        -rw-------)
+            ;;
+        *)
+            echo "ERROR: $env_file has permissions $perms — must be -rw------- (600)" >&2
+            echo "Fix: chmod 600 $env_file" >&2
+            exit 1
+            ;;
+    esac
+
+    # Check .env is gitignored
+    if [ -d "$SCRIPT_DIR/.git" ] || (cd "$SCRIPT_DIR" && git rev-parse --is-inside-work-tree >/dev/null 2>&1); then
+        if ! (cd "$SCRIPT_DIR" && git check-ignore -q "$env_file" 2>/dev/null); then
+            echo "ERROR: $env_file is NOT ignored by git and may be committed!" >&2
+            echo "Fix: echo '.env' >> $SCRIPT_DIR/.gitignore; git rm --cached $env_file 2>/dev/null || true" >&2
+            exit 1
+        fi
+    fi
+    return 0
+}
+
+_check_env_file "$ENV_FILE"
+
 # Load env
-if [[ -f "$ENV_FILE" ]]; then
+if [ -f "$ENV_FILE" ]; then
     set -a
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
+    . "$ENV_FILE"
     set +a
 fi
 
 _pid_running() {
-    [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
+    if [ -f "$PID_FILE" ]; then
+        pid="$(cat "$PID_FILE")"
+        kill -0 "$pid" 2>/dev/null
+    fi
 }
 
 cmd="${1:-status}"
@@ -49,7 +83,7 @@ case "$cmd" in
             HEALTH=$(curl -sf "http://127.0.0.1:$PORT/health" 2>/dev/null || echo '{"status":"unreachable"}')
             echo "zen_proxy started pid=$BGPID health=$HEALTH"
         else
-            echo "ERROR: zen_proxy failed to start — check $LOG_FILE"
+            echo "ERROR: zen_proxy failed to start — check $LOG_FILE" >&2
             tail -30 "$LOG_FILE"
             exit 1
         fi
@@ -61,9 +95,11 @@ case "$cmd" in
             echo "Stopping zen_proxy pid=$PID ..."
             kill "$PID"
             # wait up to 5s
-            for _ in $(seq 1 10); do
+            i=0
+            while [ $i -lt 10 ]; do
                 kill -0 "$PID" 2>/dev/null || break
                 sleep 0.5
+                i=$((i + 1))
             done
             kill -0 "$PID" 2>/dev/null && kill -9 "$PID" || true
             rm -f "$PID_FILE"
@@ -133,7 +169,7 @@ case "$cmd" in
         ;;
 
     *)
-        echo "Usage: $0 {start|stop|restart|status|logs|fg|test-mini|test-haiku|test-haiku-nonstream|test-models}"
+        echo "Usage: $0 {start|stop|restart|status|logs|fg|test-mini|test-haiku|test-haiku-nonstream|test-models}" >&2
         exit 1
         ;;
 esac

@@ -50,7 +50,7 @@ Claude (response SSE):
 Multi-turn tool result (OAI → Anthropic):
   input item type=function_call_output → messages role=user content=[tool_result]
 
-Env vars (loaded from /Users/Shared/codex/.env):
+Env vars (loaded from .env in the script directory when present):
   OPENCODE_API_KEY   — zen bearer / x-api-key token
   ZEN_PROXY_PORT     — port (default: 9099)
   ZEN_BASE_URL       — override zen base (default: https://opencode.ai/zen/v1)
@@ -73,7 +73,7 @@ from fastapi.responses import StreamingResponse
 import uvicorn
 
 # ── env ───────────────────────────────────────────────────────────────────────
-_ENV_PATH = Path("/Users/Shared/codex/.env")
+_ENV_PATH = Path(__file__).resolve().parent / ".env"
 if _ENV_PATH.exists():
     load_dotenv(_ENV_PATH)
 
