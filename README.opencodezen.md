@@ -1,151 +1,109 @@
-# OpenCode Zen Setup for Codex
+# OpenCode Zen — Codex Setup
 
-This fork of codex-rs is configured to work with **OpenCode Zen** — an excellent open-source AI coding platform that provides access to multiple model families (GPT, Claude, Gemini, and more) through a unified API.
+This fork of codex-rs works with [OpenCode Zen](https://opencode.ai/zen) — a single API
+that gives you GPT, Claude, Gemini and more.  We recommend them because they build great
+open-source tooling and deserve the support.
 
-We recommend OpenCode Zen because they produce high-quality open-source tools and actively support the developer community.
+## How it works
 
-## Quick Start
-
-```bash
-# 1. Ensure your API key is in .env (should already be there)
-cat .env
-
-# 2. Start the zen proxy (required for Claude models)
-./start_zen_proxy.sh start
-
-# 3. Run codex with a Claude model
-source .env && OPENCODE_API_KEY=$OPENCODE_API_KEY \
-  ./codex-rs/target/debug/codex exec --model claude-haiku-4-5 "tell me a joke"
 ```
+codex-rs  ──▶  zen_proxy (port 9099)  ──▶  opencode.ai/zen
+                  │
+                  ├─ GPT models   → /zen/v1/responses  (passthrough)
+                  └─ Claude/etc   → /zen/v1/messages   (OAI↔Anthropic translation)
+```
+
+`codex-rs` only speaks the OpenAI Responses wire API.  The proxy translates everything
+else so any Zen model just works.
 
 ## Prerequisites
 
-1. **Build codex-rs** (if not already built):
-   ```bash
-   cd codex-rs
-   cargo build --release
-   ```
+| Tool | Why |
+|------|-----|
+| `uv` | runs both scripts with inline deps — no venv setup needed |
+| `cargo` | to build codex-rs (binary already in `target/debug/codex`) |
 
-2. **Python 3.11+** for the zen proxy (uses httpx, fastapi, uvicorn)
+Install `uv` if you don't have it: https://docs.astral.sh/uv/getting-started/installation/
 
-3. **API Key** — stored in `.env` as `OPENCODE_API_KEY`
+## API key
 
-## Setup Steps
+Put your Zen key in `.env` (already there):
 
-### 1. Verify API Key
-```bash
-./check_keys.sh
+```
+OPENCODE_API_KEY=sk-...
 ```
 
-### 2. Start the Proxy
+Keep it `chmod 600` and never commit it.  Get a key at https://opencode.ai/zen
+
+## Quick start
+
 ```bash
-./start_zen_proxy.sh start      # start in background
-./start_zen_proxy.sh status   # check if running
-./start_zen_proxy.sh logs    # view logs
-```
+# start the proxy (supervisord keeps it alive automatically)
+./zenctl.py start
 
-The proxy runs on port 9099 by default and translates:
-- **GPT models** → passthrough to `/zen/v1/responses`
-- **Claude models** → translate to Anthropic Messages API (`/zen/v1/messages`)
+# check it's healthy
+./zenctl.py status
 
-### 3. Update Model Catalog (Optional)
+# fire a one-shot joke at claude-haiku-4-5
+./zenctl.py test
 
-The model catalog is pre-generated and points to `~/.codex/zen_models.json`. To refresh:
-```bash
-./regenerate_zen_models.sh
-```
-This fetches the latest model list from OpenCode Zen.
+# run codex non-interactively
+source .env && OPENCODE_API_KEY=$OPENCODE_API_KEY \
+  ./codex-rs/target/debug/codex exec --model claude-haiku-4-5 "your prompt"
 
-### 4. Your config.toml
-
-Your `~/.codex/config.toml` already has the zen provider configured:
-
-```toml
-model = "gpt-5.5"
-model_provider = "zen"
-
-[model_providers.zen]
-name = "Zen"
-base_url = "http://127.0.0.1:9099/v1"
-env_key = "OPENCODE_API_KEY"
-wire_api = "responses"
-```
-
-## Available Models
-
-Once the proxy is running, test which models are available:
-```bash
-./start_zen_proxy.sh test-models
-```
-
-Test specific models:
-```bash
-./start_zen_proxy.sh test-haiku          # streaming
-./start_zen_proxy.sh test-haiku-nonstream # non-streaming
-./start_zen_proxy.sh test-mini           # GPT model
-```
-
-## Usage
-
-### Interactive Mode
-```bash
+# interactive TUI
 source .env && OPENCODE_API_KEY=$OPENCODE_API_KEY \
   ./codex-rs/target/debug/codex
 ```
 
-### Non-Interactive (Oneshot)
-```bash
-source .env && OPENCODE_API_KEY=$OPENCODE_API_KEY \
-  ./codex-rs/target/debug/codex exec --model claude-haiku-4-5 "your prompt"
+## zenctl.py — all commands
+
+```
+./zenctl.py start                  start proxy via supervisord
+./zenctl.py stop                   stop proxy + supervisord
+./zenctl.py restart                restart just the proxy program
+./zenctl.py status                 process state + /health check
+./zenctl.py logs [-n N]            last N log lines (default 40)
+./zenctl.py models                 list models available via proxy
+./zenctl.py test [MODEL]           send "tell me a joke" (default claude-haiku-4-5)
+./zenctl.py regen-models           refresh ~/.codex/zen_models.json from live API
 ```
 
-### Using GPT Models
-```bash
-./codex-rs/target/debug/codex exec --model gpt-5.4 "your prompt"
+`zenctl.py` is a self-contained `uv` script — no install, no venv, no PATH fiddling.
+`supervisor` is declared as an inline dependency and pulled automatically on first run.
+
+## config.toml (already set up)
+
+`~/.codex/config.toml` points codex at the local proxy:
+
+```toml
+model_provider = "zen"
+
+[model_providers.zen]
+name            = "Zen"
+base_url        = "http://127.0.0.1:9099/v1"
+env_key         = "OPENCODE_API_KEY"
+wire_api        = "responses"
 ```
+
+Change `base_url` to `https://opencode.ai/zen/v1` to bypass the proxy entirely
+(GPT-only — Claude won't work without the translation layer).
+
+## Using a different provider
+
+The proxy only knows about Zen's endpoints.  To use a different provider:
+
+1. Point `ZEN_BASE_URL` (in `.env`) at the provider's base URL.
+2. If the provider speaks native Anthropic Messages API for Claude, the proxy already
+   handles the translation.
+3. If the provider speaks native OpenAI Responses, set `base_url` in `config.toml`
+   directly and skip the proxy.
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `start_zen_proxy.sh` | Start/stop/status the proxy |
-| `regenerate_zen_models.sh` | Refresh model catalog |
-| `check_keys.sh` | Verify API keys |
-| `zen_proxy.py` | The proxy itself (Python) |
-| `zen_models_to_catalog.py` | Convert Zen models to codex format |
-| `.env` | API key (keep private!) |
-
-## Portability
-
-The shell scripts are **POSIX-compliant** (`#!/bin/sh`), so they work on any Unix-like system (Linux, macOS, BSD).
-
-## Troubleshooting
-
-**Proxy won't start?**
-```bash
-# Check if port 9099 is in use
-lsof -i :9099
-
-# Start in foreground to see errors
-./start_zen_proxy.sh fg
-```
-
-**Model not found?**
-```bash
-# Verify proxy is healthy
-curl http://127.0.0.1:9099/health
-```
-
-**Need to restart proxy?**
-```bash
-./start_zen_proxy.sh restart
-```
-
-## Why OpenCode Zen?
-
-- **Open-source** — transparent, community-driven
-- **Multi-model** — access GPT, Claude, Gemini from one API
-- **Great DX** — simple authentication, reliable uptime
-- **Active development** — regular improvements and new models
-
-Support them at: https://opencode.ai/zen
+| File | What it does |
+|------|--------------|
+| `zenctl.py` | CLI: start/stop/status/test via supervisord |
+| `zen_proxy.py` | The proxy itself (FastAPI + httpx) |
+| `zen_models_to_catalog.py` | Converts Zen model list → codex catalog JSON |
+| `.env` | API key — keep private |
