@@ -116,6 +116,19 @@ def _health() -> dict:
         return {"status": "unreachable"}
 
 
+def _response_json(r: httpx.Response, context: str) -> dict:
+    try:
+        return r.json()
+    except ValueError:
+        body = r.text.strip() or "<empty body>"
+        print(
+            f"ERROR: {context} returned non-JSON (status={r.status_code}, content-type={r.headers.get('content-type', 'unknown')})",
+            file=sys.stderr,
+        )
+        print(body, file=sys.stderr)
+        sys.exit(1)
+
+
 # ── commands ──────────────────────────────────────────────────────────────────
 def cmd_start(_args):
     if _supervisord_running():
@@ -189,7 +202,8 @@ def cmd_models(_args):
         headers={"Authorization": f"Bearer {API_KEY}"},
         timeout=10,
     )
-    ids = [m["id"] for m in r.json().get("data", [])]
+    data = _response_json(r, "GET /v1/models")
+    ids = [m["id"] for m in data.get("data", [])]
     for mid in ids:
         print(mid)
 
@@ -212,7 +226,7 @@ def cmd_test(args):
         json=payload,
         timeout=30,
     )
-    data = r.json()
+    data = _response_json(r, "POST /v1/responses")
     if data.get("error"):
         print(f"ERROR: {data['error']}", file=sys.stderr)
         sys.exit(1)
@@ -239,7 +253,7 @@ def cmd_regen_models(_args):
     )
     r.raise_for_status()
     models_json = r.text
-    count = len(r.json().get("data", []))
+    count = len(_response_json(r, "GET https://opencode.ai/zen/v1/models").get("data", []))
     print(f"Found {count} models. Generating catalog…")
 
     result = subprocess.run(

@@ -16,6 +16,29 @@ codex-rs  ──▶  zen_proxy (port 9099)  ──▶  opencode.ai/zen
 `codex-rs` only speaks the OpenAI Responses wire API.  The proxy translates everything
 else so any Zen model just works.
 
+## Bootstrap (blank machine)
+
+The repo ships a `mise.toml` that pins `uv`.  [mise](https://mise.jdx.dev) gives you a
+reproducible toolchain without touching your system Python or manually installing `uv`.
+
+```bash
+# 1. install mise (one-time — adds itself to your shell profile automatically)
+curl https://mise.run | sh
+exec "$SHELL"
+
+# 2. add mise activation to your shell rc so it's always on PATH (one-time)
+echo 'eval "$(mise activate zsh)"' >> ~/.zshrc   # or ~/.bashrc / ~/.config/fish/config.fish
+exec "$SHELL"
+
+# 3. from the repo root — installs uv and activates the venv
+mise install
+```
+
+After step 3, `uv` and `python` are on your PATH whenever you are in this directory.
+
+> **No mise?**  Install `uv` directly:
+> `curl -LsSf https://astral.sh/uv/install.sh | sh && exec "$SHELL"`
+
 ## Prerequisites
 
 | Tool | Why |
@@ -23,7 +46,7 @@ else so any Zen model just works.
 | `uv` | runs both scripts with inline deps — no venv setup needed |
 | `cargo` | to build codex-rs (binary already in `target/debug/codex`) |
 
-Install `uv` if you don't have it: https://docs.astral.sh/uv/getting-started/installation/
+`mise install` handles `uv`.  For `cargo`: https://rustup.rs
 
 ## API key
 
@@ -38,6 +61,9 @@ Keep it `chmod 600` and never commit it.  Get a key at https://opencode.ai/zen
 ## Quick start
 
 ```bash
+# load your API key into the shell
+source .env
+
 # start the proxy (supervisord keeps it alive automatically)
 ./zenctl.py start
 
@@ -48,13 +74,14 @@ Keep it `chmod 600` and never commit it.  Get a key at https://opencode.ai/zen
 ./zenctl.py test
 
 # run codex non-interactively
-source .env && OPENCODE_API_KEY=$OPENCODE_API_KEY \
-  ./codex-rs/target/debug/codex exec --model claude-haiku-4-5 "your prompt"
+./codex-rs/target/debug/codex exec --model claude-haiku-4-5 "your prompt"
 
 # interactive TUI
-source .env && OPENCODE_API_KEY=$OPENCODE_API_KEY \
-  ./codex-rs/target/debug/codex
+./codex-rs/target/debug/codex
 ```
+
+> **Tip:** install [direnv](https://direnv.net) and add `dotenv` to `.envrc` so the key
+> is loaded automatically on `cd` without needing `source .env` each session.
 
 ## zenctl.py — all commands
 
@@ -103,7 +130,8 @@ The proxy only knows about Zen's endpoints.  To use a different provider:
 
 | File | What it does |
 |------|--------------|
+| `mise.toml` | Pins `uv`; activates venv on `cd` |
 | `zenctl.py` | CLI: start/stop/status/test via supervisord |
 | `zen_proxy.py` | The proxy itself (FastAPI + httpx) |
 | `zen_models_to_catalog.py` | Converts Zen model list → codex catalog JSON |
-| `.env` | API key — keep private |
+| `.env` | API key — keep private, never commit |
