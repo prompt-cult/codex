@@ -15,7 +15,7 @@ Usage:
   ./zenctl.py stop           — stop proxy and supervisor
   ./zenctl.py restart        — restart zen_proxy program
   ./zenctl.py status         — show process status + health endpoint
-  ./zenctl.py logs [-n N]    — tail the proxy log (default last 40 lines)
+  ./zenctl.py logs [-n N] [-f] — tail the proxy log (default last 40 lines; -f to follow)
   ./zenctl.py models         — list models available via proxy
   ./zenctl.py test [MODEL]   — send "tell me a joke" to MODEL (default claude-haiku-4-5)
   ./zenctl.py regen-models   — refresh ~/.codex/zen_models.json from live Zen API
@@ -186,11 +186,16 @@ def cmd_status(_args):
 
 def cmd_logs(args):
     n = getattr(args, "n", 40)
+    follow = getattr(args, "f", False)
     if not _LOG.exists():
         print(f"No log file yet at {_LOG}")
         return
-    lines = _LOG.read_text(errors="replace").splitlines()
-    print("\n".join(lines[-n:]))
+    if follow:
+        # print the last n lines then stream new ones with `tail -f`
+        subprocess.run(["tail", f"-{n}", "-f", str(_LOG)])
+    else:
+        lines = _LOG.read_text(errors="replace").splitlines()
+        print("\n".join(lines[-n:]))
 
 
 def cmd_models(_args):
@@ -279,6 +284,7 @@ def main():
 
     logs_p = sub.add_parser("logs", help="Show proxy log tail")
     logs_p.add_argument("-n", type=int, default=40, help="Number of lines (default 40)")
+    logs_p.add_argument("-f", action="store_true", help="Follow log output (like tail -f)")
 
     sub.add_parser("models",  help="List available models")
 

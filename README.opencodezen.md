@@ -90,7 +90,7 @@ source .env
 ./zenctl.py stop                   stop proxy + supervisord
 ./zenctl.py restart                restart just the proxy program
 ./zenctl.py status                 process state + /health check
-./zenctl.py logs [-n N]            last N log lines (default 40)
+./zenctl.py logs [-n N] [-f]       last N log lines (default 40); -f to follow
 ./zenctl.py models                 list models available via proxy
 ./zenctl.py test [MODEL]           send "tell me a joke" (default claude-haiku-4-5)
 ./zenctl.py regen-models           refresh ~/.codex/zen_models.json from live API
