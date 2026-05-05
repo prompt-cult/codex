@@ -190,12 +190,21 @@ def cmd_logs(args):
     if not _LOG.exists():
         print(f"No log file yet at {_LOG}")
         return
+    lines = _LOG.read_text(errors="replace").splitlines()
+    print("\n".join(lines[-n:]))
     if follow:
-        # print the last n lines then stream new ones with `tail -f`
-        subprocess.run(["tail", f"-{n}", "-f", str(_LOG)])
-    else:
-        lines = _LOG.read_text(errors="replace").splitlines()
-        print("\n".join(lines[-n:]))
+        # Pure-Python follow: no dependency on tail or platform flags.
+        with _LOG.open(errors="replace") as fh:
+            fh.seek(0, 2)  # jump to end
+            try:
+                while True:
+                    line = fh.readline()
+                    if line:
+                        print(line, end="", flush=True)
+                    else:
+                        time.sleep(0.2)
+            except KeyboardInterrupt:
+                pass
 
 
 def cmd_models(_args):
