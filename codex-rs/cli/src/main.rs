@@ -67,6 +67,9 @@ use codex_terminal_detection::TerminalName;
 #[clap(
     author,
     version,
+    long_version = concat!(
+        env!("CARGO_PKG_VERSION"), " (", env!("CODEX_BUILD_STAMP"), ")"
+    ),
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
