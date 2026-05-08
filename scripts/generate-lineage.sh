@@ -9,8 +9,8 @@ echo "Generating $OUTPUT..."
 # Find the nearest upstream tag in our history
 BASE_TAG=$(git describe --tags --match "rust-v[0-9]*" --abbrev=0 HEAD 2>/dev/null || echo "unknown")
 
-# Find the latest upstream tag on any remote
-LATEST_UPSTREAM_TAG=$(git tag -l "rust-v[0-9]*" --sort=-v:refname | grep -E '^rust-v[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)?$' | head -n1 || echo "unknown")
+# Find the latest upstream tag on any remote (excluding alpha/beta/prerelease)
+LATEST_UPSTREAM_TAG=$(git tag -l "rust-v[0-9]*" --sort=-v:refname | grep -E '^rust-v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || echo "unknown")
 
 # Common ancestor with upstream main
 ANCESTOR=$(git merge-base HEAD upstream/main 2>/dev/null || echo "unknown")
