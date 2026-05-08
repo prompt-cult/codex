@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure the working directory is clean
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "❌ Error: Working directory is dirty. Commit or stash changes before releasing."
+  git status --short
+  exit 1
+fi
+
 # Get today's date in YYYY.MM.DD format
 DATE=$(date +%Y.%m.%d)
 

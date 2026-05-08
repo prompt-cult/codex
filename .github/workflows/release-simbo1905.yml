@@ -72,6 +72,8 @@ jobs:
         run: |
           mkdir -p dist
           find artifacts -name "*.tar.gz" -exec cp {} dist/ \;
+          # Attach custom README files
+          find . -maxdepth 1 -name "README.*.md" -exec cp {} dist/ \;
       
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
