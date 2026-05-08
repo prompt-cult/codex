@@ -1,0 +1,81 @@
+name: release-simbo1905
+on:
+  push:
+    tags:
+      - '202[0-9].*'
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run cargo test
+        run: cargo test -p codex-core -p codex-tui -p codex-zen-proxy
+
+  build:
+    needs: test
+    name: Build - ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            asset_name: codex-macos-arm64
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            asset_name: codex-linux-x64
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      
+      - if: matrix.os == 'ubuntu-latest'
+        name: Install musl-tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }} --bin codex --bin codex-zen-proxy
+        working-directory: .
+
+      - name: Prepare assets
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/codex dist/${{ matrix.asset_name }}
+          cp target/${{ matrix.target }}/release/codex-zen-proxy dist/codex-zen-proxy-${{ matrix.asset_name }}
+          cd dist
+          tar -czf ../${{ matrix.asset_name }}.tar.gz *
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Flatten artifacts
+        run: |
+          mkdir -p dist
+          find artifacts -name "*.tar.gz" -exec cp {} dist/ \;
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
