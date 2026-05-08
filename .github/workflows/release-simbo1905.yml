@@ -68,11 +68,14 @@ jobs:
         with:
           path: artifacts
       
+      - name: Generate lineage report
+        run: ./scripts/generate-lineage.sh
+
       - name: Flatten artifacts
         run: |
           mkdir -p dist
           find artifacts -name "*.tar.gz" -exec cp {} dist/ \;
-          # Attach custom README files
+          # Attach custom README files and lineage report
           find . -maxdepth 1 -name "README.*.md" -exec cp {} dist/ \;
       
       - name: Create GitHub Release
