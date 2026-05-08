@@ -505,6 +505,9 @@ pub enum AltScreenMode {
 #[serde(rename_all = "snake_case")]
 pub enum ModeKind {
     Plan,
+    /// Ask mode: no tools sent to the model. Pure Q&A with full codebase
+    /// context. Faster and cheaper than Default or Plan modes.
+    Ask,
     #[default]
     #[serde(
         alias = "code",
@@ -525,12 +528,14 @@ pub enum ModeKind {
     Execute,
 }
 
-pub const TUI_VISIBLE_COLLABORATION_MODES: [ModeKind; 2] = [ModeKind::Default, ModeKind::Plan];
+pub const TUI_VISIBLE_COLLABORATION_MODES: [ModeKind; 3] =
+    [ModeKind::Default, ModeKind::Plan, ModeKind::Ask];
 
 impl ModeKind {
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::Plan => "Plan",
+            Self::Ask => "Ask",
             Self::Default => "Default",
             Self::PairProgramming => "Pair Programming",
             Self::Execute => "Execute",
@@ -538,11 +543,16 @@ impl ModeKind {
     }
 
     pub const fn is_tui_visible(self) -> bool {
-        matches!(self, Self::Plan | Self::Default)
+        matches!(self, Self::Plan | Self::Default | Self::Ask)
     }
 
     pub const fn allows_request_user_input(self) -> bool {
         matches!(self, Self::Plan)
+    }
+
+    /// Ask mode sends zero tools to the model — pure Q&A.
+    pub const fn suppresses_tools(self) -> bool {
+        matches!(self, Self::Ask)
     }
 }
 

@@ -63,6 +63,26 @@ impl ChatWidget {
         self.bottom_pane.record_pending_slash_command_history();
     }
 
+    fn apply_ask_slash_command(&mut self) -> bool {
+        if !self.collaboration_modes_enabled() {
+            self.add_info_message(
+                "Collaboration modes are disabled.".to_string(),
+                Some("Enable collaboration modes to use /ask.".to_string()),
+            );
+            return false;
+        }
+        if let Some(mask) = collaboration_modes::ask_mask(self.model_catalog.as_ref()) {
+            self.set_collaboration_mask(mask);
+            true
+        } else {
+            self.add_info_message(
+                "Ask mode unavailable right now.".to_string(),
+                /*hint*/ None,
+            );
+            false
+        }
+    }
+
     fn apply_plan_slash_command(&mut self) -> bool {
         if !self.collaboration_modes_enabled() {
             self.add_info_message(
@@ -208,6 +228,9 @@ impl ChatWidget {
             }
             SlashCommand::Plan => {
                 self.apply_plan_slash_command();
+            }
+            SlashCommand::Ask => {
+                self.apply_ask_slash_command();
             }
             SlashCommand::Goal => {
                 if !self.config.features.enabled(Feature::Goals) {
@@ -926,6 +949,7 @@ impl ChatWidget {
             | SlashCommand::Settings
             | SlashCommand::Personality
             | SlashCommand::Plan
+            | SlashCommand::Ask
             | SlashCommand::Goal
             | SlashCommand::Collab
             | SlashCommand::Side
