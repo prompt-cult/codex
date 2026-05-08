@@ -8,17 +8,24 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: codex-rs
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Run cargo test
-        run: cargo test -p codex-core -p codex-tui -p codex-zen-proxy
+        run: cargo test -p codex-core -p codex-tui
 
   build:
     needs: test
     name: Build - ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: codex-rs
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: aarch64-apple-darwin
@@ -33,28 +40,27 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      
-      - if: matrix.os == 'ubuntu-latest'
+
+      - if: matrix.target == 'x86_64-unknown-linux-musl'
         name: Install musl-tools
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build release
-        run: cargo build --release --target ${{ matrix.target }} --bin codex --bin codex-zen-proxy
-        working-directory: .
+        run: cargo build --release --target ${{ matrix.target }} --bin codex
 
       - name: Prepare assets
+        shell: bash
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/codex dist/${{ matrix.asset_name }}
-          cp target/${{ matrix.target }}/release/codex-zen-proxy dist/codex-zen-proxy-${{ matrix.asset_name }}
           cd dist
-          tar -czf ../${{ matrix.asset_name }}.tar.gz *
-      
+          tar -czf ../${{ matrix.asset_name }}.tar.gz ${{ matrix.asset_name }}
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}.tar.gz
+          path: codex-rs/${{ matrix.asset_name }}.tar.gz
 
   release:
     needs: build
@@ -63,21 +69,18 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      
-      - name: Generate lineage report
-        run: ./scripts/generate-lineage.sh
 
       - name: Flatten artifacts
         run: |
           mkdir -p dist
           find artifacts -name "*.tar.gz" -exec cp {} dist/ \;
-          # Attach custom README files and lineage report
           find . -maxdepth 1 -name "README.*.md" -exec cp {} dist/ \;
-      
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
