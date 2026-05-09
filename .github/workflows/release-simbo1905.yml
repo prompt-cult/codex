@@ -14,6 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: codex-rs
       - name: Run cargo test
         run: cargo test -p codex-tui
 
@@ -25,6 +28,9 @@ jobs:
     defaults:
       run:
         working-directory: codex-rs
+    env:
+      # thin LTO is much faster than fat while still producing an optimised binary
+      CARGO_PROFILE_RELEASE_LTO: thin
     strategy:
       fail-fast: false
       matrix:
@@ -41,6 +47,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: codex-rs
+          key: ${{ matrix.target }}
 
       - if: runner.os == 'Linux'
         name: Install Linux build dependencies
