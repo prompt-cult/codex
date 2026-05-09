@@ -150,11 +150,8 @@ jobs:
             runner: macos-15-xlarge
             timeout_minutes: 30
           - name: Windows
-            runner: windows-x64
+            runner: blacksmith-4vcpu-windows-2025
             timeout_minutes: 30
-            runs_on:
-              group: codex-runners
-              labels: blacksmith-4vcpu-windows-2025
     steps:
       - name: Check whether argument comment lint should run
         id: argument_comment_lint_gate
