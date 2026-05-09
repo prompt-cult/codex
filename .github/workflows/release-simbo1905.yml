@@ -35,8 +35,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: blacksmith-4vcpu-ubuntu-2404
-            os: ubuntu-latest
+          - target: x86_64-unknown-linux-gnu
+            os: blacksmith-4vcpu-ubuntu-2404
             asset_name: codex-linux-x64
 
     steps:
