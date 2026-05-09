@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   metadata:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       release_tag: ${{ steps.release_tag.outputs.release_tag }}
       v8_version: ${{ steps.v8_version.outputs.version }}
@@ -66,7 +66,7 @@ jobs:
             target: x86_64-unknown-linux-musl
           - runner: ubuntu-24.04-arm
             platform: linux_arm64_musl
-            target: aarch64-unknown-linux-musl
+            target: blacksmith-4vcpu-ubuntu-2404-arm
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -142,7 +142,7 @@ jobs:
     needs:
       - metadata
       - build
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
       actions: read

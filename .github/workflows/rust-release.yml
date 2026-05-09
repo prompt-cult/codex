@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   tag-check:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
@@ -113,7 +113,7 @@ jobs:
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             bundle: app-server
-            artifact_name: aarch64-unknown-linux-musl-app-server
+            artifact_name: blacksmith-4vcpu-ubuntu-2404-arm
             binaries: "codex-app-server"
             build_dmg: "false"
 
@@ -464,7 +464,7 @@ jobs:
       - argument-comment-lint-release-assets
       - zsh-release-assets
     name: release
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
       actions: read
@@ -631,7 +631,7 @@ jobs:
     if: ${{ needs.release.outputs.should_publish_npm == 'true' }}
     name: publish-npm
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       id-token: write # Required for OIDC
       contents: read
@@ -788,7 +788,7 @@ jobs:
     if: ${{ !contains(needs.release.outputs.version, '-') }}
     # This job only invokes a GitHub Action to open/update the winget-pkgs PR;
     # it does not execute Windows-only tooling, so Linux is sufficient.
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
 
@@ -808,7 +808,7 @@ jobs:
     permissions:
       contents: write
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
       - name: Update latest-alpha-cli branch

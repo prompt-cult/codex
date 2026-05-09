@@ -56,14 +56,14 @@ jobs:
           - runner: windows-x64
             target: x86_64-pc-windows-msvc
             bundle: helpers
-            binaries: "codex-windows-sandbox-setup codex-command-runner"
+            binaries: "blacksmith-4vcpu-windows-2025"
             runs_on:
               group: codex-runners
               labels: codex-windows-x64
           - runner: windows-arm64
             target: aarch64-pc-windows-msvc
             bundle: helpers
-            binaries: "codex-windows-sandbox-setup codex-command-runner"
+            binaries: "blacksmith-4vcpu-windows-2025"
             runs_on:
               group: codex-runners
               labels: codex-windows-arm64
@@ -159,7 +159,7 @@ jobs:
               group: codex-runners
               labels: codex-windows-x64
           - runner: windows-arm64
-            target: aarch64-pc-windows-msvc
+            target: blacksmith-4vcpu-windows-2025
             runs_on:
               group: codex-runners
               labels: codex-windows-arm64
