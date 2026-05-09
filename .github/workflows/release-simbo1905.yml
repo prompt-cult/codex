@@ -17,6 +17,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: codex-rs
+          cache-on-failure: "true"
       - name: Run cargo test
         run: cargo test -p codex-tui
 
@@ -29,7 +30,7 @@ jobs:
       run:
         working-directory: codex-rs
     env:
-      # thin LTO is much faster than fat while still producing an optimised binary
+      # thin LTO: much faster link than fat, still optimised
       CARGO_PROFILE_RELEASE_LTO: thin
     strategy:
       fail-fast: false
@@ -39,7 +40,7 @@ jobs:
             os: macos-15
             asset_name: codex-macos-arm64
           - target: x86_64-unknown-linux-gnu
-            os: blacksmith-4vcpu-ubuntu-2404
+            os: blacksmith-8vcpu-ubuntu-2404
             asset_name: codex-linux-x64
 
     steps:
@@ -50,7 +51,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: codex-rs
-          key: ${{ matrix.target }}
+          # separate cache per target triple
+          shared-key: release-${{ matrix.target }}
+          cache-on-failure: "true"
 
       - if: runner.os == 'Linux'
         name: Install Linux build dependencies
