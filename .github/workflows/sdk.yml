@@ -7,9 +7,7 @@ on:
 
 jobs:
   sdks:
-    runs-on:
-      group: codex-runners
-      labels: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - name: Checkout repository
