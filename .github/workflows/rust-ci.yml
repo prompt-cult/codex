@@ -7,7 +7,7 @@ jobs:
   # --- Detect what changed so the fast PR workflow only runs relevant jobs ----
   changed:
     name: Detect changed areas
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       argument_comment_lint: ${{ steps.detect.outputs.argument_comment_lint }}
       argument_comment_lint_package: ${{ steps.detect.outputs.argument_comment_lint_package }}
@@ -54,7 +54,7 @@ jobs:
   # --- Fast Cargo-native PR checks -------------------------------------------
   general:
     name: Format / etc
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: changed
     if: ${{ needs.changed.outputs.codex == 'true' || needs.changed.outputs.workflows == 'true' }}
     defaults:
@@ -70,7 +70,7 @@ jobs:
 
   cargo_shear:
     name: cargo shear
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: changed
     if: ${{ needs.changed.outputs.codex == 'true' || needs.changed.outputs.workflows == 'true' }}
     defaults:
@@ -88,7 +88,7 @@ jobs:
 
   argument_comment_lint_package:
     name: Argument comment lint package
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: changed
     if: ${{ needs.changed.outputs.argument_comment_lint_package == 'true' }}
     env:
@@ -154,7 +154,7 @@ jobs:
             timeout_minutes: 30
             runs_on:
               group: codex-runners
-              labels: codex-windows-x64
+              labels: blacksmith-4vcpu-windows-2025
     steps:
       - name: Check whether argument comment lint should run
         id: argument_comment_lint_gate
@@ -191,7 +191,7 @@ jobs:
         argument_comment_lint_prebuilt,
       ]
     if: always()
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Summarize
         shell: bash

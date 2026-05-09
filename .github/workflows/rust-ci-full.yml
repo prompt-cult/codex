@@ -12,7 +12,7 @@ jobs:
   # --- CI that doesn't need specific targets ---------------------------------
   general:
     name: Format / etc
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     defaults:
       run:
         working-directory: codex-rs
@@ -26,7 +26,7 @@ jobs:
 
   cargo_shear:
     name: cargo shear
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     defaults:
       run:
         working-directory: codex-rs
@@ -42,7 +42,7 @@ jobs:
 
   argument_comment_lint_package:
     name: Argument comment lint package
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     env:
       CARGO_DYLINT_VERSION: 5.0.0
       DYLINT_LINK_VERSION: 5.0.0
@@ -95,7 +95,7 @@ jobs:
             runner: windows-x64
             runs_on:
               group: codex-runners
-              labels: codex-windows-x64
+              labels: blacksmith-4vcpu-windows-2025
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: ./.github/actions/setup-bazel-ci
@@ -176,7 +176,7 @@ jobs:
               group: codex-runners
               labels: codex-linux-x64
           - runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-musl
+            target: blacksmith-4vcpu-ubuntu-2404-arm
             profile: dev
             runs_on:
               group: codex-runners
@@ -214,7 +214,7 @@ jobs:
               group: codex-runners
               labels: codex-linux-x64
           - runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-musl
+            target: blacksmith-4vcpu-ubuntu-2404-arm
             profile: release
             runs_on:
               group: codex-runners
@@ -540,7 +540,7 @@ jobs:
               group: codex-runners
               labels: codex-linux-x64
           - runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
+            target: blacksmith-4vcpu-ubuntu-2404-arm
             profile: dev
             runs_on:
               group: codex-runners
@@ -746,7 +746,7 @@ jobs:
         tests,
       ]
     if: always()
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Summarize
         shell: bash

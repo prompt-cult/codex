@@ -36,7 +36,7 @@ jobs:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04
-            target: x86_64-unknown-linux-musl
+            target: blacksmith-4vcpu-ubuntu-2404
           # 2026-02-27 Bazel tests have been flaky on arm in CI.
           # Disable until we can investigate and stabilize them.
           # - os: ubuntu-24.04-arm
@@ -144,7 +144,7 @@ jobs:
     # it a larger timeout.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     timeout-minutes: 40
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     name: Bazel test on windows-latest for x86_64-pc-windows-gnullvm (native main)
 
     steps:
@@ -226,7 +226,7 @@ jobs:
           - os: macos-15-xlarge
             target: aarch64-apple-darwin
           - os: windows-latest
-            target: x86_64-pc-windows-gnullvm
+            target: blacksmith-4vcpu-windows-2025
     runs-on: ${{ matrix.os }}
     name: Bazel clippy on ${{ matrix.os }} for ${{ matrix.target }}
 
@@ -313,7 +313,7 @@ jobs:
           - os: macos-15-xlarge
             target: aarch64-apple-darwin
           - os: windows-latest
-            target: x86_64-pc-windows-gnullvm
+            target: blacksmith-4vcpu-windows-2025
     runs-on: ${{ matrix.os }}
     name: Verify release build on ${{ matrix.os }} for ${{ matrix.target }}
 
