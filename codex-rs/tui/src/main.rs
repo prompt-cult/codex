@@ -37,6 +37,7 @@ fn format_exit_messages(exit_info: AppExitInfo, color_enabled: bool) -> Vec<Stri
 }
 
 #[derive(Parser, Debug)]
+#[clap(version = codex_tui::CODEX_CLI_VERSION)]
 struct TopCli {
     #[clap(flatten)]
     config_overrides: CliConfigOverrides,

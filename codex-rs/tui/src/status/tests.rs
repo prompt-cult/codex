@@ -143,6 +143,13 @@ fn sanitize_directory(lines: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+fn sanitize_version(lines: Vec<String>) -> Vec<String> {
+    lines
+        .into_iter()
+        .map(|line| line.replace(crate::CODEX_CLI_VERSION, "<VERSION>"))
+        .collect()
+}
+
 fn reset_at_from(captured_at: &chrono::DateTime<chrono::Local>, seconds: i64) -> i64 {
     (*captured_at + ChronoDuration::seconds(seconds))
         .with_timezone(&Utc)
@@ -254,7 +261,7 @@ async fn status_snapshot_includes_reasoning_details() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -513,7 +520,7 @@ async fn status_snapshot_shows_active_user_defined_profile() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -611,7 +618,7 @@ async fn status_snapshot_shows_auto_review_permissions() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -717,7 +724,7 @@ async fn status_snapshot_includes_forked_from() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -780,7 +787,7 @@ async fn status_snapshot_includes_monthly_limit() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1087,7 +1094,7 @@ async fn status_snapshot_truncates_in_narrow_terminal() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_version(sanitize_directory(rendered_lines)).join("\n");
 
     assert_snapshot!(sanitized);
 }
@@ -1136,7 +1143,7 @@ async fn status_snapshot_shows_missing_limits_message() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1187,7 +1194,7 @@ async fn status_snapshot_uses_default_reasoning_when_config_empty() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1252,7 +1259,7 @@ async fn status_snapshot_shows_refreshing_limits_notice() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1322,7 +1329,7 @@ async fn status_snapshot_includes_credits_and_limits() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1380,7 +1387,7 @@ async fn status_snapshot_shows_unavailable_limits_message() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1438,7 +1445,7 @@ async fn status_snapshot_treats_refreshing_empty_limits_as_unavailable() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1505,7 +1512,7 @@ async fn status_snapshot_shows_stale_limits_message() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1576,7 +1583,7 @@ async fn status_snapshot_cached_limits_hide_credits_without_flag() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 

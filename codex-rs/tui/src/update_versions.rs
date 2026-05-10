@@ -9,6 +9,7 @@ pub(crate) fn extract_version_from_latest_tag(latest_tag_name: &str) -> anyhow::
     latest_tag_name
         .strip_prefix("rust-v")
         .map(str::to_owned)
+        .or_else(|| is_release_tag_version(latest_tag_name).then(|| latest_tag_name.to_string()))
         .ok_or_else(|| anyhow::anyhow!("Failed to parse latest tag name '{latest_tag_name}'"))
 }
 
@@ -17,11 +18,57 @@ pub(crate) fn is_source_build_version(version: &str) -> bool {
 }
 
 fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
-    let mut iter = v.trim().split('.');
+    let trimmed = v.trim();
+    if let Some(version) = trimmed.strip_prefix("rust-v") {
+        return parse_semver(version);
+    }
+    if let Some(version) = parse_semver(trimmed) {
+        return Some(version);
+    }
+    parse_release_tag_version(trimmed)
+}
+
+fn parse_semver(v: &str) -> Option<(u64, u64, u64)> {
+    let mut iter = v.split('.');
     let maj = iter.next()?.parse::<u64>().ok()?;
     let min = iter.next()?.parse::<u64>().ok()?;
     let pat = iter.next()?.parse::<u64>().ok()?;
+    if iter.next().is_some() {
+        return None;
+    }
     Some((maj, min, pat))
+}
+
+fn parse_release_tag_version(v: &str) -> Option<(u64, u64, u64)> {
+    let mut iter = v.split('.');
+    let year = iter.next()?.parse::<u64>().ok()?;
+    let month = iter.next()?.parse::<u64>().ok()?;
+    let day_and_suffix = iter.next()?;
+    if iter.next().is_some() {
+        return None;
+    }
+
+    let mut suffix_iter = day_and_suffix.split('-');
+    let day = suffix_iter.next()?.parse::<u64>().ok()?;
+    let sha = suffix_iter.next()?;
+    if !(7..=10).contains(&sha.len()) || !sha.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+
+    if let Some(extra) = suffix_iter.next()
+        && extra != "dirty"
+    {
+        return None;
+    }
+    if suffix_iter.next().is_some() {
+        return None;
+    }
+
+    Some((year, month, day))
+}
+
+fn is_release_tag_version(v: &str) -> bool {
+    parse_release_tag_version(v).is_some()
 }
 
 #[cfg(test)]
@@ -43,9 +90,30 @@ mod tests {
     }
 
     #[test]
+    fn extracts_release_tag_version() {
+        assert_eq!(
+            extract_version_from_latest_tag("2026.05.10-1f52616766")
+                .expect("failed to parse release tag"),
+            "2026.05.10-1f52616766"
+        );
+    }
+
+    #[test]
     fn prerelease_version_is_not_considered_newer() {
         assert_eq!(is_newer("0.11.0-beta.1", "0.11.0"), None);
         assert_eq!(is_newer("1.0.0-rc.1", "1.0.0"), None);
+    }
+
+    #[test]
+    fn release_tag_versions_compare_by_date() {
+        assert_eq!(
+            is_newer("2026.05.10-1f52616766", "2026.05.09-b8ac6d6b2c"),
+            Some(true)
+        );
+        assert_eq!(
+            is_newer("2026.05.09-b8ac6d6b2c", "2026.05.10-1f52616766"),
+            Some(false)
+        );
     }
 
     #[test]

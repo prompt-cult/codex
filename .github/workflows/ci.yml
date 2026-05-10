@@ -2,7 +2,10 @@ name: ci
 
 on:
   pull_request: {}
-  push: { branches: [main] }
+  push:
+    branches:
+      - main
+      - simbo1905-v0.129.0
 
 jobs:
   build-test:

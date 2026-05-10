@@ -3476,6 +3476,10 @@ mod tests {
         std::env::temp_dir()
     }
 
+    fn sanitize_version(text: String) -> String {
+        text.replace(crate::CODEX_CLI_VERSION, "<VERSION>")
+    }
+
     fn stdio_server_config(
         command: &str,
         args: Vec<&str>,
@@ -3957,7 +3961,7 @@ mod tests {
             /*show_fast_status*/ false,
         );
 
-        let rendered = render_transcript(&cell).join("\n");
+        let rendered = sanitize_version(render_transcript(&cell).join("\n"));
         insta::assert_snapshot!(rendered);
     }
 

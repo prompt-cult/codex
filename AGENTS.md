@@ -217,3 +217,79 @@ These guidelines apply to app-server protocol work in `codex-rs`, especially:
 - Validate with `cargo test -p codex-app-server-protocol`.
 - Avoid boilerplate tests that only assert experimental field markers for individual
   request fields in `common.rs`; rely on schema generation/tests and behavioral coverage instead.
+
+## Local dev binary versioning and symlinking
+
+The user runs codex from a symlink at `~/.local/bin/codex` that points to a versioned binary in the
+same directory. This allows any version to be restored by re-pointing the symlink.
+
+### Version string
+
+The versioned binary name is computed at install time as:
+
+```
+codex-{crate_version}-{short_sha}[-dirty]
+```
+
+- `{crate_version}` — the version from `codex-rs/tui/Cargo.toml` (e.g. `0.121.0`)
+- `{short_sha}` — 10-char git SHA of HEAD at build time
+- `-dirty` — appended if the working tree has any tracked modifications at build time
+
+Examples:
+- `codex-0.121.0-1f52616766` (clean commit)
+- `codex-0.121.0-1f52616766-dirty` (uncommitted changes present)
+
+This mirrors starship-style prompt versioning: the dirty flag is visible in the binary name so you
+always know exactly what state produced the binary, without running any git commands.
+
+### Which binary to install
+
+- **Clean commit** (`codex-x.y.z-{sha}`) → install the **stripped** binary. Debug symbols are
+  recoverable: check out that exact SHA in a detached HEAD, rebuild with `cargo build`, and you
+  have full symbols again.
+- **Dirty working tree** (`codex-x.y.z-{sha}-dirty`) → install the **full debug** binary
+  (unstripped). The exact dirty state is not recoverable from git, so symbols must be preserved
+  in the binary itself.
+
+Clean binaries are immutable — never overwrite a file that already exists at that versioned path.
+Dirty binaries may be overwritten (same SHA + dirty can differ between saves).
+
+### Install procedure
+
+```bash
+# compute version string
+CRATE_VER=$(cargo metadata --no-deps --manifest-path codex-rs/tui/Cargo.toml \
+  --format-version 1 | jq -r '.packages[0].version')
+SHORT_SHA=$(git rev-parse --short=10 HEAD)
+DIRTY=$(git status --porcelain | grep -v '^\?\?' | wc -l | tr -d ' ')
+[ "$DIRTY" -gt 0 ] && DIRTY_SUFFIX="-dirty" || DIRTY_SUFFIX=""
+VERSION="${CRATE_VER}-${SHORT_SHA}${DIRTY_SUFFIX}"
+DEST=~/.local/bin/codex-${VERSION}
+
+if [ "$DIRTY" -gt 0 ]; then
+  # dirty: use full debug binary (symbols preserved)
+  SRC=codex-rs/target/debug/codex
+else
+  # clean: strip first, install stripped
+  strip -o /tmp/codex-stripped codex-rs/target/debug/codex
+  SRC=/tmp/codex-stripped
+fi
+
+# never overwrite a clean versioned binary
+if [ ! -f "$DEST" ] || [ -n "$DIRTY_SUFFIX" ]; then
+  cp "$SRC" "$DEST"
+  chmod +x "$DEST"
+fi
+
+# update symlink atomically
+ln -sf "$DEST" ~/.local/bin/codex
+echo "codex -> $DEST"
+```
+
+### Other tools (zen-proxy, etc.)
+
+Apply the same convention to every binary produced by this workspace. For example:
+- `~/.local/bin/codex-zen-proxy-{version}` → symlinked as `codex-zen-proxy`
+
+All versioned binaries live alongside the symlinks in `~/.local/bin/` so the directory is
+self-documenting and any version can be restored with a single `ln -sf`.
