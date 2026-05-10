@@ -236,6 +236,7 @@ codex-{crate_version}-{short_sha}[-dirty]
 - `-dirty` — appended if the working tree has any tracked modifications at build time
 
 Examples:
+
 - `codex-0.121.0-1f52616766` (clean commit)
 - `codex-0.121.0-1f52616766-dirty` (uncommitted changes present)
 
@@ -289,6 +290,7 @@ echo "codex -> $DEST"
 ### Other tools (zen-proxy, etc.)
 
 Apply the same convention to every binary produced by this workspace. For example:
+
 - `~/.local/bin/codex-zen-proxy-{version}` → symlinked as `codex-zen-proxy`
 
 All versioned binaries live alongside the symlinks in `~/.local/bin/` so the directory is

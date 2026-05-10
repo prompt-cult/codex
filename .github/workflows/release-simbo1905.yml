@@ -4,7 +4,7 @@ on:
     branches:
       - simbo1905-v0.129.0
     tags:
-      - '202[0-9].*'
+      - "202[0-9].*"
   workflow_dispatch:
 
 jobs:
