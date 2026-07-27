@@ -11,15 +11,28 @@ export async function callOpenAiChat(model, prompt, apiKey, fetchImpl) {
   if (model.supportsTemperature !== false) {
     body.temperature = 0;
   }
+  // Local drivers such as Ollama serve the OpenAI wire without auth; sending
+  // an empty bearer token there is worse than sending no header at all.
+  const headers = apiKey ? { authorization: `Bearer ${apiKey}` } : {};
   const data = await postJson(
     `${model.baseUrl}/chat/completions`,
     body,
-    { authorization: `Bearer ${apiKey}` },
+    headers,
     fetchImpl,
   );
-  const output = data.choices?.[0]?.message?.content;
+  const choice = data.choices?.[0];
+  const output = choice?.message?.content;
   if (typeof output !== "string") {
     throw new Error("Chat Completions response did not contain text output");
+  }
+  // Reasoning models spend the output budget on hidden reasoning first, so a
+  // budget that is too small returns an empty `content` with finish_reason
+  // "length" rather than an HTTP error.
+  if (output === "" && choice.finish_reason === "length") {
+    throw new Error(
+      `${model.driver}/${model.model} truncated before emitting text: max_tokens=${model.maxOutputTokens} ` +
+        `was consumed by reasoning (think=${model.think}, completion_tokens=${data.usage?.completion_tokens})`,
+    );
   }
   return { output, tokenUsage: normalizeUsage(data.usage) };
 }

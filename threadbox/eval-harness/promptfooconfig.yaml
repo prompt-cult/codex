@@ -3,8 +3,9 @@
 # Run with: npx promptfoo eval   (from this directory)
 #
 # Providers use ThreadBox's curated model policy and wire adapters.
-# Routine evaluation defaults to the eco profile. Operators can set
-# THREADBOX_PROFILE, THREADBOX_ROLE_<ROLE>, or THREADBOX_FORCE_MODEL.
+# Routine evaluation defaults to the eco tier. Operators can set
+# THREADBOX_TIER (alias THREADBOX_PROFILE), THREADBOX_ROLE_<ROLE>, or
+# THREADBOX_FORCE_MODEL.
 #
 # Green-when (Phase 1 hard gate; see README.md "What green means"):
 # promptfoo eval passes for at least 2 providers x 2 katas. The full
@@ -20,25 +21,26 @@ prompts:
   - file://prompts/system.md
 
 providers:
-  # Model selection is driven by role + THREADBOX_PROFILE (default: eco).
-  # `label` is only a display hint; the resolved model comes from models.yaml.
+  # Selection is a tier x role lookup: the tier comes from THREADBOX_TIER
+  # (default: eco), the role from `config.role` below. `label` is only a
+  # display hint; the resolved model comes from policy.yaml + catalogs/.
   - id: file://providers/threadbox-provider.mjs
-    label: role-review
+    label: tier-x-role/review
     config:
       role: review
 
   - id: file://providers/threadbox-provider.mjs
-    label: role-code
+    label: tier-x-role/code
     config:
       role: code
 
   - id: file://providers/threadbox-provider.mjs
-    label: role-plan
+    label: tier-x-role/plan
     config:
       role: plan
 
   - id: file://providers/threadbox-provider.mjs
-    label: role-summarize
+    label: tier-x-role/summarize
     config:
       role: summarize
 

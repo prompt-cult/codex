@@ -52,6 +52,37 @@ sandbox compiler can allowlist by module prefix and version together
 | `threadbox.trace.v1` | `publish` | `nodeHandle: NodeHandle, schemaId: SchemaId` | `void` | Marks the terminal output of the graph. Exactly one call per program. |
 | `threadbox.value.v1` | *(reserved)* | -- | -- | Reserved for Phase 6 callback opcode ABI (`value_*` family per the ThreadBox synthesis docs). Not used by any Phase 1 kata. |
 
+## Model selection is *not* on the ABI
+
+`assembly/models.d.ts` adds no import and no export to the table above.
+It is a pure builder: `withPlanMode` / `withBuildMode` /
+`withReviewMode` / `withSummarizeMode` return an inert `ModelSpec`
+record, and `ModelSpec.toJSON()` renders it as a flat JSON object. No
+function in that file opens a connection, reads an environment
+variable, or knows a base URL.
+
+The record has exactly seven slots; absent fields are the empty string
+(or `0` for `contextWindow`) and are omitted from the JSON:
+
+| Field | Wasm type | Meaning |
+|---|---|---|
+| `role` | UTF-16 string | `plan` / `code` / `review` / `summarize`. Always present. |
+| `tier` | UTF-16 string | `eco` / `balanced` / `performance`. Set only by the tier-only call form. |
+| `vendor` | UTF-16 string | Matched against a catalog entry's `vendor:`. |
+| `model` | UTF-16 string | Catalog reference, catalog key, or wire model id. |
+| `think` | UTF-16 string | `none` / `low` / `medium` / `high`. |
+| `contextWindow` | `i32` | Exact match against a catalog entry's `contextWindow:`. |
+| `driver` | UTF-16 string | Disambiguates a model that more than one driver carries. |
+
+Resolution happens entirely host-side in
+`eval-harness/providers/spec.mjs`, against the sysadmin-owned
+`eval-harness/policy.yaml` and the versioned
+`eval-harness/catalogs/*.yaml`. A tier-only spec takes the policy path;
+any explicit field takes the allowlist-filter path, where zero matches
+and ambiguous matches are both hard configuration errors. Because the
+mapping lives outside the guest, retiring a model is a catalog edit and
+never an ABI change.
+
 ## Six sub-proofs required before this table is trusted (Phase 2 spike)
 
 1. `asc --exportTable --exportStart` output actually loads in `wasmi`.

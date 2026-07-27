@@ -1,0 +1,93 @@
+# OpenCode Go driver catalog.
+#
+# Go carries the open-weight budget models on a lower cost profile than
+# Zen, so it is the default home for the `eco` tier. Every `model:`
+# below was verified against the authenticated
+# GET https://opencode.ai/zen/go/v1/models response for catalogVersion.
+driver: opencode-go
+catalogVersion: 2026-07-27
+baseUrl: https://opencode.ai/zen/go/v1
+apiKeyEnv: OPENCODE_API_KEY
+models:
+  qwen-code:
+    model: qwen3.6-plus
+    wire: messages
+    vendor: alibaba
+    contextWindow: 262144
+    think: low
+    costClass: low
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 2048
+
+  qwen-plus-next:
+    model: qwen3.7-plus
+    wire: messages
+    vendor: alibaba
+    contextWindow: 262144
+    think: medium
+    costClass: low
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 2048
+
+  kimi-code:
+    model: kimi-k2.7-code
+    wire: chat-completions
+    vendor: moonshot
+    contextWindow: 262144
+    think: low
+    costClass: low
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 2048
+
+  glm-code:
+    model: glm-5.2
+    wire: chat-completions
+    vendor: zhipu
+    contextWindow: 204800
+    think: low
+    costClass: low
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 2048
+
+  deepseek-flash:
+    model: deepseek-v4-flash
+    wire: chat-completions
+    vendor: deepseek
+    contextWindow: 131072
+    think: low
+    costClass: low
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 2048
+
+  minimax-balanced:
+    model: minimax-m3
+    wire: messages
+    vendor: minimax
+    contextWindow: 204800
+    think: medium
+    costClass: standard
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 4096
+
+  grok-balanced:
+    model: grok-4.5
+    wire: chat-completions
+    vendor: xai
+    contextWindow: 256000
+    think: medium
+    costClass: standard
+    roles: [plan, code, review]
+    maxOutputTokens: 4096
+
+  kimi-performance:
+    model: kimi-k3
+    wire: chat-completions
+    vendor: moonshot
+    contextWindow: 262144
+    think: high
+    costClass: premium
+    roles: [plan, code, review]
+    maxOutputTokens: 4096
+    # kimi-k3 is a reasoning model: sending `temperature` returns
+    # HTTP 400 "Upstream request failed" from the Go provider.
+    supportsTemperature: false

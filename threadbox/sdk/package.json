@@ -4,7 +4,9 @@
   "private": true,
   "description": "ThreadBox AssemblyScript SDK skeleton (Phase 1: type-checked kata-authoring surface, no Wasm codegen)",
   "scripts": {
-    "check": "asc assembly/threadbox.d.ts --noEmit"
+    "check": "npm run check:abi && npm run check:models",
+    "check:abi": "asc assembly/threadbox.d.ts --noEmit",
+    "check:models": "asc assembly/models.d.ts --noEmit"
   },
   "dependencies": {
     "assemblyscript": "0.28.20"

@@ -2,7 +2,8 @@ import { callAnthropicMessages } from "./anthropic-messages.mjs";
 import { callGemini } from "./gemini.mjs";
 import { callOpenAiChat } from "./openai-chat.mjs";
 import { callOpenAiResponses } from "./openai-responses.mjs";
-import { loadPolicy, resolveModel } from "./policy.mjs";
+import { loadPolicy } from "./policy.mjs";
+import { resolveSpec } from "./spec.mjs";
 
 // Load the repo-root .env (gitignored) so provider API keys resolve when this
 // provider runs under promptfoo, which does not source .env itself. Env vars
@@ -25,20 +26,20 @@ export default class ThreadBoxProvider {
 
   async callApi(prompt) {
     try {
-      const policy = await loadPolicy(this.config.policyPath);
-      const model = resolveModel(policy, this.config);
-      const apiKey = process.env[model.apiKeyEnv];
-      if (!apiKey) {
-        return { error: `${model.apiKeyEnv} is required for ${model.provider}` };
-      }
+      const { policyPath, catalogDir, ...spec } = this.config;
+      const policy = await loadPolicy({ policyPath, catalogDir });
+      const model = resolveSpec(policy, spec);
+      const apiKey = resolveApiKey(model);
       const result = await callWire(model, prompt, apiKey);
       return {
         ...result,
         metadata: {
-          provider: model.provider,
+          driver: model.driver,
           model: model.model,
-          modelId: model.id,
-          profile: model.profile,
+          catalogRef: model.id,
+          catalogVersion: model.catalogVersion,
+          tier: model.tier,
+          role: model.role,
           wire: model.wire,
           costClass: model.costClass,
         },
@@ -47,6 +48,19 @@ export default class ThreadBoxProvider {
       return { error: error instanceof Error ? error.message : String(error) };
     }
   }
+}
+
+/// Local drivers declare `requiresApiKey: false` and are called without
+/// credentials; every remote driver must supply its declared env var.
+export function resolveApiKey(model, environment = process.env) {
+  if (!model.requiresApiKey) {
+    return "";
+  }
+  const apiKey = environment[model.apiKeyEnv];
+  if (!apiKey) {
+    throw new Error(`${model.apiKeyEnv} is required for driver '${model.driver}'`);
+  }
+  return apiKey;
 }
 
 export function callWire(model, prompt, apiKey, fetchImpl = fetch) {

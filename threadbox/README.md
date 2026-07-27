@@ -13,10 +13,12 @@ and no Wasm execution; grading is done by type-checking (`asc
 --noEmit`), structural fingerprinting, and static lint.
 
 Phase 1 owns its provider policy rather than routing through Codex.
-OpenCode Zen, OpenCode Go, Mistral, and Groq are selected through a
-curated allowlist in `eval-harness/models.yaml`. DSL programs identify
-logical roles such as `plan`, `code`, `review`, and `summarize`; they
-never choose unrestricted model IDs or provider URLs.
+OpenCode Zen, OpenCode Go, Mistral, Groq, and a local Ollama runtime are
+described by versioned driver catalogs in `eval-harness/catalogs/`, and
+mapped to logical constants by a single sysadmin-owned
+`eval-harness/policy.yaml`. DSL programs identify a tier and a logical
+role such as `plan`, `code`, `review`, or `summarize`; they never choose
+unrestricted model IDs or provider URLs.
 
 See the top-level plan (`submit_plan` output from the ThreadBox
 planning session) for the full 14-phase roadmap. This README only
@@ -32,9 +34,10 @@ threadbox/
     package.json              # pins assemblyscript version used for `asc --noEmit`
   eval-harness/
     package.json              # pins promptfoo (separate from sdk's package.json on purpose)
-    models.yaml               # provider allowlist, profiles, and role aliases
+    catalogs/                 # versioned per-driver model catalogs
+    policy.yaml               # sysadmin-owned tier x role mapping
     promptfooconfig.yaml       # providers x prompts x graders matrix
-    providers/                 # provider policy and wire-protocol adapters
+    providers/                 # policy/spec resolution and wire-protocol adapters
     prompts/
       system.md                # SDK docs + 2 worked reference examples, injected into every kata
       kata-s1.md               # parallel review of the current change (fork/join/rank)
@@ -63,31 +66,40 @@ schedules (AS compiler bumps vs promptfoo config changes).
 
 ## What "green" means for Phase 1
 
-`promptfoo eval` using the `eco` profile passes for at least 2
+`promptfoo eval` using the `eco` tier passes for at least 2
 providers x 2 katas. The full Zen, Go, Mistral, and Groq x 4-kata
 matrix is a stretch goal tracked in `RESULTS.md`, not a blocking gate.
 
 ## Model policy
 
-Three named profiles provide operator-owned defaults:
+Model configuration is split by ownership. A **driver catalog** under
+`catalogs/` states what a vendor currently serves and carries a
+`catalogVersion`; it is replaced wholesale when models are added or
+retired. `policy.yaml` states which logical constant maps to which
+catalog entry and is edited by the sysadmin.
 
-- `eco` uses free, subscription, or economical models for continuous
-  regression.
-- `balanced` uses stronger open models while avoiding premium models
-  by default.
-- `performance` permits premium models for demonstrations and
-  explicitly requested high-quality runs.
+Programs address a tier and a role, written `Tier::Role`:
+
+- `eco` uses free, subscription, local, or economical models for
+  continuous regression.
+- `balanced` uses stronger models below the vendor price spike.
+- `performance` permits premium models with long context and reasoning
+  enabled.
+
+Roles are `plan`, `code` (alias `build`), `review`, and `summarize`.
 
 Resolution precedence is:
 
-1. `THREADBOX_FORCE_MODEL` forces one enabled, allowlisted model for
+1. `THREADBOX_FORCE_MODEL` forces one enabled, catalogued entry for
    every compatible role.
 2. `THREADBOX_ROLE_<ROLE>` overrides one logical role.
-3. `THREADBOX_PROFILE` selects a named profile.
-4. `defaultProfile` in `models.yaml` is used otherwise.
+3. `THREADBOX_TIER` (alias `THREADBOX_PROFILE`) selects a tier.
+4. `defaultTier` in `policy.yaml` is used otherwise.
 
 Unknown, disabled, incompatible, or over-budget selections fail before
-any network call. Generated AssemblyScript cannot change this policy.
+any network call, including when forced by environment variable.
+Generated AssemblyScript cannot change this policy. See `PROVIDERS.md`
+for the catalog and policy schemas and the builder sub-DSL.
 
 ## Provider keys
 
@@ -96,6 +108,8 @@ Provider secrets are read only from environment variables:
 - `OPENCODE_API_KEY` for both OpenCode Zen and OpenCode Go.
 - `MISTRAL_API_KEY` for Mistral.
 - `GROQ_API_KEY` for Groq.
+- Ollama needs no key; it is reached at `http://localhost:11434/v1` and
+  smoke-tested as `SKIP` when the daemon is not running.
 
 The provider layer never prints keys or authorization headers. The
 local `.env` file is for development only and must remain ignored.

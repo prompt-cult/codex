@@ -9,14 +9,26 @@ policy, and future runtime. It does not extend Codex provider routing.
 
 - Keep provider URLs, credentials, and concrete model selection out of
   generated AssemblyScript.
-- Resolve logical roles through the curated `models.yaml` allowlist.
-- Reject unknown, disabled, incompatible, and disallowed-cost models
-  before performing network I/O.
+- Keep the two ownership boundaries separate: versioned driver catalogs
+  in `catalogs/` describe what a vendor serves; `policy.yaml` maps
+  logical tier x role constants to catalog entries.
+- Address catalog entries as `driverId:modelId`. Require
+  `catalogVersion`; reject duplicate or unknown identifiers at load
+  time.
+- Reject unknown, disabled, incompatible, and over-budget models before
+  performing network I/O, including when forced by environment
+  variable.
+- The builder sub-DSL emits a plain specification record and performs no
+  I/O; `resolveSpec()` maps that record onto a catalog entry with an
+  exhaustive switch, treating zero matches and ambiguous matches as hard
+  configuration errors.
 - Never log secrets, authorization headers, or complete provider error
   bodies.
 - Keep policy resolution independent from wire-protocol adapters.
 - Prefer deterministic, capped, sequential live smoke tests.
 - Live tests are opt-in. Unit tests must mock network access.
+- Ollama is the free local driver: optional auth, and the smoke reports
+  `SKIP` on connection refused rather than failing.
 - Add providers incrementally; deferred providers remain documented
   rather than partially implemented.
 
