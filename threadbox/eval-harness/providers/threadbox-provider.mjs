@@ -4,6 +4,15 @@ import { callOpenAiChat } from "./openai-chat.mjs";
 import { callOpenAiResponses } from "./openai-responses.mjs";
 import { loadPolicy, resolveModel } from "./policy.mjs";
 
+// Load the repo-root .env (gitignored) so provider API keys resolve when this
+// provider runs under promptfoo, which does not source .env itself. Env vars
+// already present in the real environment take precedence. Missing file is OK.
+try {
+  process.loadEnvFile(new URL("../../../.env", import.meta.url));
+} catch {
+  /* .env absent: rely on ambient process.env */
+}
+
 export default class ThreadBoxProvider {
   constructor(options = {}) {
     this.providerId = options.id || "threadbox";

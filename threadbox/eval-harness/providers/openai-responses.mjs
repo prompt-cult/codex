@@ -7,7 +7,7 @@ export async function callOpenAiResponses(model, prompt, apiKey, fetchImpl) {
       model: model.model,
       input: prompt,
       max_output_tokens: model.maxOutputTokens,
-      temperature: 0,
+      // No temperature: reasoning models (gpt-5.x) reject a temperature param.
     },
     { authorization: `Bearer ${apiKey}` },
     fetchImpl,

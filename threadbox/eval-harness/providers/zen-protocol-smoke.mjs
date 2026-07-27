@@ -1,7 +1,7 @@
 import { callWire } from "./threadbox-provider.mjs";
 import { loadPolicy, resolveModel } from "./policy.mjs";
 
-process.loadEnvFile(new URL("../../.env", import.meta.url));
+process.loadEnvFile(new URL("../../../.env", import.meta.url));
 
 const policy = await loadPolicy();
 const apiKey = process.env.OPENCODE_API_KEY;

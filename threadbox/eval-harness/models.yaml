@@ -4,7 +4,7 @@ defaultProfile: eco
 models:
   zen-free-open:
     provider: zen
-    model: deepseek-v4-flash-free
+    model: ling-3.0-flash-free
     wire: chat-completions
     baseUrl: https://opencode.ai/zen/v1
     apiKeyEnv: OPENCODE_API_KEY

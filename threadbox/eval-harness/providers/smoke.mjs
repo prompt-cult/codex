@@ -1,7 +1,7 @@
 import { callWire } from "./threadbox-provider.mjs";
 import { loadPolicy, resolveModel } from "./policy.mjs";
 
-process.loadEnvFile(new URL("../../.env", import.meta.url));
+process.loadEnvFile(new URL("../../../.env", import.meta.url));
 
 const DEFAULT_PROVIDERS = ["zen", "go", "mistral", "groq"];
 const SMOKE_MODELS = {
