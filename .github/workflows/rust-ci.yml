@@ -136,7 +136,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout_minutes }}
     needs: changed
-    if: ${{ (needs.changed.outputs.argument_comment_lint == 'true' || needs.changed.outputs.workflows == 'true') && secrets.BUILDBUDDY_API_KEY != '' }}
+    if: ${{ needs.changed.outputs.argument_comment_lint == 'true' || needs.changed.outputs.workflows == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -208,9 +208,7 @@ jobs:
           fi
 
           if [[ '${{ needs.changed.outputs.argument_comment_lint }}' == 'true' || '${{ needs.changed.outputs.workflows }}' == 'true' ]]; then
-            if [[ '${{ needs.argument_comment_lint_prebuilt.result }}' != 'skipped' ]]; then
-              [[ '${{ needs.argument_comment_lint_prebuilt.result }}' == 'success' ]] || { echo 'argument_comment_lint_prebuilt failed'; exit 1; }
-            fi
+            [[ '${{ needs.argument_comment_lint_prebuilt.result }}' == 'success' ]] || { echo 'argument_comment_lint_prebuilt failed'; exit 1; }
           fi
 
           if [[ '${{ needs.changed.outputs.codex }}' == 'true' || '${{ needs.changed.outputs.workflows }}' == 'true' ]]; then
