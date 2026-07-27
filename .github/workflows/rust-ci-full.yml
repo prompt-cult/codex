@@ -565,7 +565,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           # Required for bubblewrap to work on Linux CI runners.
-          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          # Some ARM64 kernels don't have this sysctl, so check if it exists first.
+          if sudo sysctl -a 2>/dev/null | grep -q '^kernel.unprivileged_userns_clone'; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
           # Ubuntu 24.04+ can additionally gate unprivileged user namespaces
           # behind AppArmor.
           if sudo sysctl -a 2>/dev/null | grep -q '^kernel.apparmor_restrict_unprivileged_userns'; then
