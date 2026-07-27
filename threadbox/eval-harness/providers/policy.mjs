@@ -73,6 +73,14 @@ function validateModel(modelId, model) {
   if (!Number.isInteger(model.maxOutputTokens) || model.maxOutputTokens <= 0) {
     throw new Error(`model '${modelId}' has invalid maxOutputTokens`);
   }
+  if (
+    model.supportsTemperature !== undefined &&
+    typeof model.supportsTemperature !== "boolean"
+  ) {
+    throw new Error(
+      `model '${modelId}' has non-boolean supportsTemperature '${model.supportsTemperature}'`,
+    );
+  }
 }
 
 export function resolveModel(policy, options, environment = process.env) {

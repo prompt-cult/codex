@@ -100,12 +100,51 @@ Total tokens: 19,382 (15,999 prompt / 3,383 completion). Duration 23 s.
 | plan | go-kimi-performance | kimi-k3 (Go) | 0/4; HTTP 400 upstream failure |
 | summarize | groq-strong | llama-3.3-70b-versatile (Groq) | 4/4 pass |
 
-The four Kimi K3 failures are a provider/model availability finding:
-the authenticated Go catalog lists `kimi-k3`, but every Chat
-Completions request returned the same sanitized HTTP 400:
-`Error from provider (Console Go): Upstream request failed`. The
-ThreadBox adapter supplied the standard OpenAI-compatible request
-shape and other Go models passed the eco matrix, so this run does not
-change the adapter or weaken the grader. Kimi K3 should remain
-disabled for routine performance evaluations until its provider-side
-availability or required request shape is confirmed.
+The four Kimi K3 failures were root-caused and **fixed** (see below).
+
+## Kimi K3 root cause and fix
+
+Date: 2026-07-27
+
+`kimi-k3` is a reasoning model that **rejects the `temperature`
+parameter**. Sending `temperature: 0` returns HTTP 400
+`Error from provider (Console Go): Upstream request failed`; omitting
+it returns HTTP 200. Isolated by direct probing:
+
+| Model (Go, chat-completions) | `temperature: 0` | omitted |
+|---|---|---|
+| `kimi-k3` | HTTP 400 | HTTP 200 |
+| `kimi-k2.7-code` | HTTP 200 | HTTP 200 |
+| `glm-5.2` | HTTP 200 | HTTP 200 |
+| `deepseek-v4-flash` | HTTP 200 | HTTP 200 |
+
+This is the same class of defect as the earlier `gpt-5.x` Responses
+fix, but on the Chat Completions wire. It is model-specific, not
+provider-wide: the earlier `kimi-k2.7-code` 400 was transient
+rate-limiting, not this bug.
+
+`kimi-k3` is **not available on Zen** — that endpoint returns HTTP 401
+`Model kimi-k3 is not supported`. It exists only in the Go catalog.
+
+Fix: added an opt-out `supportsTemperature: false` flag on the model
+record, honoured by `openai-chat.mjs` and type-validated in
+`policy.mjs`. The flag defaults to sending `temperature: 0`, so no
+other model changed behaviour.
+
+## Performance profile run (after Kimi K3 fix)
+
+| Result | Count |
+|---|---|
+| Passed | 13 (81.25%) |
+| Failed | 3 (18.75%) |
+| Errors | **0** |
+
+Total tokens: 27,165. Duration 1m 54s.
+
+`kimi-k3` (plan) now passes **4/4** katas. The three remaining
+non-passes are structural-fingerprint misses, not infrastructure:
+
+- `s4` / review (`gpt-5.6-luna`): `Uni.dedupeArray` found 0, need >= 1.
+- `s4` / code (`mistral-large-latest`): 4 agent calls, at most 3 allowed.
+- `s6` / code (`mistral-large-latest`): used `Flow.agent`, which this
+  kata forbids.

@@ -126,3 +126,16 @@ test("resolveModel rejects unknown allowedCostClasses values", async () => {
     /unknown allowedCostClass/,
   );
 });
+
+test("supportsTemperature must be boolean when present", async () => {
+  const policy = await loadPolicy();
+  const malformed = structuredClone(policy);
+  malformed.models["go-kimi-performance"].supportsTemperature = "false";
+  assert.throws(() => validatePolicy(malformed), /non-boolean supportsTemperature/);
+});
+
+test("kimi-k3 is configured to omit temperature", async () => {
+  const policy = await loadPolicy();
+  assert.equal(policy.models["go-kimi-performance"].model, "kimi-k3");
+  assert.equal(policy.models["go-kimi-performance"].supportsTemperature, false);
+});

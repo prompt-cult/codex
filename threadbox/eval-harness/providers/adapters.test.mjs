@@ -104,3 +104,31 @@ test("provider errors are bounded", async () => {
     },
   );
 });
+test("Chat adapter omits temperature when supportsTemperature is false", async () => {
+  const mock = mockedFetch({
+    choices: [{ message: { content: "reasoning output" } }],
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+  });
+  const reasoningModel = { ...model("chat-completions"), supportsTemperature: false };
+  await callWire(reasoningModel, "hello", "secret", mock.fetchImpl);
+  const body = JSON.parse(mock.calls[0].options.body);
+  assert.equal("temperature" in body, false);
+  assert.deepEqual(body, {
+    model: "example-model",
+    messages: [{ role: "user", content: "hello" }],
+    max_tokens: 123,
+  });
+});
+
+test("Chat adapter still sends temperature when the flag is absent or true", async () => {
+  for (const supportsTemperature of [undefined, true]) {
+    const mock = mockedFetch({
+      choices: [{ message: { content: "out" } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    });
+    const m = { ...model("chat-completions") };
+    if (supportsTemperature !== undefined) m.supportsTemperature = supportsTemperature;
+    await callWire(m, "hello", "secret", mock.fetchImpl);
+    assert.equal(JSON.parse(mock.calls[0].options.body).temperature, 0);
+  }
+});

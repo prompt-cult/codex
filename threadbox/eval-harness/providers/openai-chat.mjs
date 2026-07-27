@@ -1,14 +1,19 @@
 import { normalizeUsage, postJson } from "./http.mjs";
 
 export async function callOpenAiChat(model, prompt, apiKey, fetchImpl) {
+  // Reasoning models (e.g. Go kimi-k3) reject `temperature` outright with an
+  // upstream HTTP 400, so it is opt-out per model via supportsTemperature.
+  const body = {
+    model: model.model,
+    messages: [{ role: "user", content: prompt }],
+    max_tokens: model.maxOutputTokens,
+  };
+  if (model.supportsTemperature !== false) {
+    body.temperature = 0;
+  }
   const data = await postJson(
     `${model.baseUrl}/chat/completions`,
-    {
-      model: model.model,
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: model.maxOutputTokens,
-      temperature: 0,
-    },
+    body,
     { authorization: `Bearer ${apiKey}` },
     fetchImpl,
   );

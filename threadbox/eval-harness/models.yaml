@@ -78,6 +78,9 @@ models:
     enabled: true
     costClass: premium
     maxOutputTokens: 4096
+    # kimi-k3 is a reasoning model: sending `temperature` returns HTTP 400
+    # "Upstream request failed" from the Go provider.
+    supportsTemperature: false
 
   mistral-small:
     provider: mistral
