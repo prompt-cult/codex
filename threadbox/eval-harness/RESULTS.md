@@ -78,4 +78,34 @@ model-capability findings, not harness defects:
 - Direct Moonshot / Anthropic / OpenAI bring-your-own-key providers.
 - Groq Whisper / speech / Compound systems.
 - Automatic pricing discovery and budget accounting.
-- `eval:performance` matrix (premium models; run only on explicit request).
+
+## Performance profile run
+
+Date: 2026-07-27
+Profile: `performance` (`allowedCostClasses: [free, low, premium]`)
+Command: `npm run eval:performance -- --output /tmp/threadbox-performance-eval.json`
+
+| Result | Count |
+|---|---|
+| Passed | 10 (62.50%) |
+| Failed | 2 (12.50%) |
+| Errors | 4 (25.00%) |
+
+Total tokens: 19,382 (15,999 prompt / 3,383 completion). Duration 23 s.
+
+| Role | Model ID | Provider model | Outcome |
+|---|---|---|---|
+| review | zen-gpt-luna | gpt-5.6-luna (Zen) | 3/4 pass; s4 missed dedupe |
+| code | mistral-large | mistral-large-latest | 3/4 pass; s4 exceeded structural limits |
+| plan | go-kimi-performance | kimi-k3 (Go) | 0/4; HTTP 400 upstream failure |
+| summarize | groq-strong | llama-3.3-70b-versatile (Groq) | 4/4 pass |
+
+The four Kimi K3 failures are a provider/model availability finding:
+the authenticated Go catalog lists `kimi-k3`, but every Chat
+Completions request returned the same sanitized HTTP 400:
+`Error from provider (Console Go): Upstream request failed`. The
+ThreadBox adapter supplied the standard OpenAI-compatible request
+shape and other Go models passed the eco matrix, so this run does not
+change the adapter or weaken the grader. Kimi K3 should remain
+disabled for routine performance evaluations until its provider-side
+availability or required request shape is confirmed.
