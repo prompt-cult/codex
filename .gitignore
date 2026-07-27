@@ -44,6 +44,14 @@ AGENTS.override.md
 *.tsbuildinfo
 .tmp/
 
+# local git worktrees checked out inside the repo root
+/main/
+/v0.141.0/
+
+# nested standalone clones of separate published repos
+/codex_chat_history/
+/cursor_chat_history/
+
 # logs
 *.log
 npm-debug.log*
