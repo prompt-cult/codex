@@ -7,7 +7,7 @@ on:
 jobs:
   test:
     name: Run Tests
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -22,11 +22,14 @@ jobs:
       matrix:
         include:
           - target: aarch64-apple-darwin
-            os: macos-latest
+            os: blacksmith-6vcpu-macos-15
             asset_name: codex-macos-arm64
           - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
+            os: blacksmith-4vcpu-ubuntu-2404
             asset_name: codex-linux-x64
+          - target: aarch64-unknown-linux-musl
+            os: blacksmith-4vcpu-ubuntu-2404-arm
+            asset_name: codex-linux-arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +37,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       
-      - if: matrix.os == 'ubuntu-latest'
+      - if: contains(matrix.os, 'ubuntu')
         name: Install musl-tools
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
@@ -58,7 +61,7 @@ jobs:
 
   release:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
     steps:

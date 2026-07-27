@@ -1,0 +1,23 @@
+FROM debian:trixie-slim
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG TARGETARCH
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential curl git ca-certificates \
+    pkg-config libcap-dev clang musl-tools libssl-dev \
+    just && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -s /bin/bash -u 1000 builder
+USER builder
+
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal && \
+    ~/.cargo/bin/rustup target add aarch64-unknown-linux-musl && \
+    ~/.cargo/bin/rustup target add x86_64-unknown-linux-musl && \
+    ~/.cargo/bin/rustup component add clippy rustfmt
+
+ENV PATH="/home/builder/.cargo/bin:${PATH}"
+
+WORKDIR /workspace
