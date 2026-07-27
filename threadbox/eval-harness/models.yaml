@@ -1,0 +1,144 @@
+version: 1
+defaultProfile: eco
+
+models:
+  zen-free-open:
+    provider: zen
+    model: deepseek-v4-flash-free
+    wire: chat-completions
+    baseUrl: https://opencode.ai/zen/v1
+    apiKeyEnv: OPENCODE_API_KEY
+    roles: [plan, code, review, summarize]
+    enabled: true
+    costClass: free
+    maxOutputTokens: 2048
+
+  zen-gpt-luna:
+    provider: zen
+    model: gpt-5.6-luna
+    wire: responses
+    baseUrl: https://opencode.ai/zen/v1
+    apiKeyEnv: OPENCODE_API_KEY
+    roles: [plan, code, review]
+    enabled: true
+    costClass: premium
+    maxOutputTokens: 2048
+
+  zen-claude-haiku:
+    provider: zen
+    model: claude-haiku-4-5
+    wire: messages
+    baseUrl: https://opencode.ai/zen/v1
+    apiKeyEnv: OPENCODE_API_KEY
+    roles: [plan, code, review, summarize]
+    enabled: true
+    costClass: low
+    maxOutputTokens: 2048
+
+  zen-gemini-flash-lite:
+    provider: zen
+    model: gemini-3.5-flash-lite
+    wire: gemini
+    baseUrl: https://opencode.ai/zen/v1
+    apiKeyEnv: OPENCODE_API_KEY
+    roles: [plan, code, review, summarize]
+    enabled: true
+    costClass: low
+    maxOutputTokens: 2048
+
+  go-qwen-code:
+    provider: go
+    model: qwen3.6-plus
+    wire: messages
+    baseUrl: https://opencode.ai/zen/go/v1
+    apiKeyEnv: OPENCODE_API_KEY
+    roles: [plan, code, review, summarize]
+    enabled: true
+    costClass: low
+    maxOutputTokens: 2048
+
+  go-kimi-code:
+    provider: go
+    model: kimi-k2.7-code
+    wire: chat-completions
+    baseUrl: https://opencode.ai/zen/go/v1
+    apiKeyEnv: OPENCODE_API_KEY
+    roles: [plan, code, review, summarize]
+    enabled: true
+    costClass: low
+    maxOutputTokens: 2048
+
+  go-kimi-performance:
+    provider: go
+    model: kimi-k3
+    wire: chat-completions
+    baseUrl: https://opencode.ai/zen/go/v1
+    apiKeyEnv: OPENCODE_API_KEY
+    roles: [plan, code, review]
+    enabled: true
+    costClass: premium
+    maxOutputTokens: 4096
+
+  mistral-small:
+    provider: mistral
+    model: mistral-small-latest
+    wire: chat-completions
+    baseUrl: https://api.mistral.ai/v1
+    apiKeyEnv: MISTRAL_API_KEY
+    roles: [plan, code, review, summarize]
+    enabled: true
+    costClass: low
+    maxOutputTokens: 2048
+
+  mistral-large:
+    provider: mistral
+    model: mistral-large-latest
+    wire: chat-completions
+    baseUrl: https://api.mistral.ai/v1
+    apiKeyEnv: MISTRAL_API_KEY
+    roles: [plan, code, review]
+    enabled: true
+    costClass: premium
+    maxOutputTokens: 4096
+
+  groq-fast:
+    provider: groq
+    model: llama-3.1-8b-instant
+    wire: chat-completions
+    baseUrl: https://api.groq.com/openai/v1
+    apiKeyEnv: GROQ_API_KEY
+    roles: [plan, code, review, summarize]
+    enabled: true
+    costClass: low
+    maxOutputTokens: 2048
+
+  groq-strong:
+    provider: groq
+    model: llama-3.3-70b-versatile
+    wire: chat-completions
+    baseUrl: https://api.groq.com/openai/v1
+    apiKeyEnv: GROQ_API_KEY
+    roles: [plan, code, review, summarize]
+    enabled: true
+    costClass: low
+    maxOutputTokens: 4096
+
+profiles:
+  eco:
+    allowedCostClasses: [free, low]
+    plan: go-qwen-code
+    code: go-qwen-code
+    review: zen-free-open
+    summarize: groq-fast
+  balanced:
+    allowedCostClasses: [free, low]
+    plan: go-kimi-code
+    code: go-qwen-code
+    review: mistral-small
+    summarize: groq-strong
+  performance:
+    allowedCostClasses: [free, low, premium]
+    plan: go-kimi-performance
+    code: mistral-large
+    review: zen-gpt-luna
+    summarize: groq-strong
