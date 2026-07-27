@@ -49,6 +49,22 @@ Every construct below exists because that scenario needs it. Nothing else exists
 AssemblyScript subset in use forbids function overloading. The node records which
 form was used; see `IR.md`.
 
+`.scale(width)` takes an explicit width, where the original sketch had `.scale()`
+with none. The width is what makes a located coordinate meaningful: the graph
+records the normalization it was reasoned about at, and the mapping back to full
+page coordinates happens outside the graph. This document is normative and the
+sketch is superseded.
+
+`.locate()` and `.confirm()` both take an optional model. When it is omitted the
+operator's configured default for that node kind applies; nothing about the graph
+becomes unresolved.
+
+`Multi.over(ref).forEach(body)` calls `body(element: FieldRef): Step`. The body
+builds a **self-contained** chain — it starts with its own `screenshot()` and takes
+no seed cursor — because the body is constructed before the `ForEach` node that
+names it. That is what keeps every edge in the graph pointing backward; see
+`IR.md`.
+
 ## Types
 
 | Type | Produced by | Purpose |
@@ -79,22 +95,24 @@ field of the submission into it, save, and confirm the save happened.
 ```ts
 import { loadJson, screenshot, Multi, Step, FieldRef, Doc } from "../assembly/ir";
 import { emitGraph } from "../assembly/emit";
-import { Tier, Providers, Model, Think, Context,
-         withReviewMode, withPlanMode } from "../assembly/models";
+import { Spec, Tier, Providers, Model, Think, Context,
+         withReviewMode } from "../assembly/models";
 
 // The submission is declared, not read. The guest has no filesystem;
 // whoever eventually runs the graph supplies the document by name.
 const submission: Doc = loadJson("submission");
 
-/// Locate a control by description and click it. The vision model is
-/// named explicitly because resolving pixels to coordinates is not one
-/// of the four logical roles.
-function openSearchBox(from: Step): Step {
-  return from
-    .then(screenshot().scale(1280))
+/// Find the search box and click it. The vision model is named
+/// explicitly, so the record takes the catalog filter path and carries
+/// no role: resolving pixels to coordinates is not one of the four
+/// logical roles.
+function openSearchBox(): Step {
+  return screenshot()
+    .scale(1280)
     .locate("the text input labelled 'Search' at the top of the page",
-            withPlanMode(Providers.Anthropic, Model.OpusLatest,
-                         Think.Medium, Context.OneMillion))
+            Spec.model(Providers.Anthropic, Model.OpusPerformance)
+                .think(Think.Medium)
+                .context(Context.OneMillion))
     .click();
 }
 
@@ -123,12 +141,15 @@ function createNewCase(from: Step): Step {
 /// One field of the submission. Each element of `answers` carries the
 /// label to find and the value to key.
 ///
-/// Three attempts against the cheap locator, then one escalation to a
+/// The body is self-contained: it starts its own chain and receives no
+/// cursor, because it is built before the ForEach node that names it.
+///
+/// Three attempts against the default locator, then one escalation to a
 /// stronger model. `attempts` is a literal, so the cost of this body is
 /// bounded before the graph runs.
-function enterField(element: FieldRef, from: Step): Step {
-  return from
-    .then(screenshot().scale(1280))
+function enterField(element: FieldRef): Step {
+  return screenshot()
+    .scale(1280)
     .locate("the input whose visible label matches the element label")
     .click()
     .typeField(element)
@@ -137,15 +158,16 @@ function enterField(element: FieldRef, from: Step): Step {
       screenshot()
         .scale(1920)
         .locate("the input whose visible label matches the element label",
-                withPlanMode(Providers.Anthropic, Model.OpusLatest,
-                             Think.High, Context.OneMillion))
+                Spec.model(Providers.Anthropic, Model.OpusPerformance)
+                    .think(Think.High)
+                    .context(Context.OneMillion))
         .click()
         .typeField(element)
     );
 }
 
 export function main(): void {
-  const searched: Step = openSearchBox(submission.begin())
+  const searched: Step = openSearchBox()
     .typeField(submission.field("caseNumber"))
     .then(screenshot().scale(1280));
 
@@ -153,7 +175,7 @@ export function main(): void {
   // observe a value during construction.
   const opened: Step = searched
     .confirm("the search results table contains at least one row",
-             withReviewMode(Tier.Balanced))
+             withReviewMode(Spec.tier(Tier.Balanced)))
     .branch(openExistingCase, createNewCase);
 
   const filled: Step = Multi.over(submission.fields("answers"))
@@ -166,7 +188,7 @@ export function main(): void {
     .click()
     .then(screenshot().scale(1280))
     .confirm("a confirmation banner reading 'Case saved' is visible",
-             withReviewMode(Tier.Balanced))
+             withReviewMode(Spec.tier(Tier.Balanced)))
     .attempts(2)
     .publish();
 
@@ -184,25 +206,39 @@ A separate builder in `guest/assembly/models.ts` producing inert records. It add
 no import and no export. Nothing in it opens a connection, reads an environment
 variable, or knows a URL.
 
-Two call forms:
+A record is built in two steps: `Spec` names the axes, and a role wrapper binds it
+to a logical role. Keeping them separate is what avoids overloading — every
+function below has exactly one signature, since the AssemblyScript subset in use
+forbids two functions of the same name and forbids a parameter that accepts either
+a tier or a vendor.
 
-| Form | Emitted record |
+| Factory | Emitted record |
 |---|---|
-| `withPlanMode(Tier.Performance)` | `{ role: "plan", tier: "performance" }` |
-| `withPlanMode(Providers.Anthropic, Model.OpusLatest, Think.Medium, Context.OneMillion)` | `{ role: "plan", vendor: "anthropic", model: "opus-performance", think: "medium", contextWindow: 1000000 }` |
+| `withPlanMode(Spec.tier(Tier.Performance))` | `{ role: "plan", tier: "performance" }` |
+| `withReviewMode(Spec.tier(Tier.Balanced))` | `{ role: "review", tier: "balanced" }` |
+| `Spec.model(Providers.Anthropic, Model.OpusPerformance).think(Think.Medium).context(Context.OneMillion)` | `{ vendor: "anthropic", model: "opus-performance", think: "medium", contextWindow: 1000000 }` |
+| `Spec.on(Driver.OpenCodeGo, Model.QwenCode)` | `{ driver: "opencode-go", model: "qwen-code" }` |
 
-`withBuildMode`, `withReviewMode`, and `withSummarizeMode` are the same shapes
-with `role` set to `code`, `review`, and `summarize`.
+`withBuildMode` and `withSummarizeMode` bind `role` to `code` and `summarize` the
+same way. `.think()`, `.context()`, and `.on()` are chainable refinements that each
+set one slot and return the record.
 
 The record has seven slots: `role`, `tier`, `vendor`, `model`, `think`,
 `contextWindow`, `driver`. **Absent slots are omitted from the serialized form and
 impose no constraint** — a record constrains exactly the axes the author named.
 
-A tier-only record defers entirely to the operator: whatever the operator
-currently calls the performance planner. Any explicit field takes the filter path
-instead, where zero matches and ambiguous matches are both hard configuration
-errors. Because the mapping lives outside the guest, retiring a model is a catalog
-edit and never a change to any program.
+There are exactly two resolution paths, and `tier` decides which:
+
+- **`Spec.tier(...)` wrapped in a role** takes the policy path and defers entirely
+  to the operator: whatever the operator currently calls the performance planner.
+  Both `role` and `tier` are required, because the lookup key is the pair.
+- **`Spec.model(...)` or `Spec.on(...)`** takes the catalog filter path, where zero
+  matches and ambiguous matches are both hard configuration errors. These carry no
+  `role`, because they name their model directly and no policy lookup happens. A
+  vision model for `.locate()` is exactly this case.
+
+Because the mapping lives outside the guest, retiring a model is a catalog edit and
+never a change to any program.
 
 Named constants exist so no program carries a magic number:
 
@@ -216,12 +252,19 @@ Named constants exist so no program carries a magic number:
 | `Think` | `None`, `Low`, `Medium`, `High` |
 | `Context` | window sizes present in at least one catalog entry |
 
+`Model` constants are named for the catalog reference they emit, not for a notion
+of recency: `Model.OpusPerformance` emits `"opus-performance"`. A constant whose
+name and emitted string disagree would leave an implementer guessing which is
+authoritative.
+
 `vendor` and `driver` are separate axes: one driver serves several vendors, and
 two drivers may both carry the same model.
 
-`.locate()` names its vision model explicitly, because resolving pixels to
-coordinates is not one of the four logical roles. `.confirm()` is a `review`
-judgement and takes the tier-only form naturally.
+Both `.locate()` and `.confirm()` may omit the model entirely, in which case the
+operator's configured default for that node kind applies. When `.locate()` does
+name one it uses the filter path, because vision is not one of the four roles;
+`.confirm()` is a `review` judgement and takes `withReviewMode(Spec.tier(...))`
+naturally.
 
 ## What is deliberately absent
 
