@@ -1,0 +1,19 @@
+# Ollama driver catalog: the local, free driver.
+#
+# No API key is required. When the daemon is not listening the live
+# smoke reports SKIP rather than failing, because a developer machine
+# is not obliged to run a local model server.
+driver: ollama
+catalogVersion: 2026-07-27
+baseUrl: http://localhost:11434/v1
+requiresApiKey: false
+models:
+  gemma4:
+    model: gemma4:26b
+    wire: chat-completions
+    vendor: google
+    contextWindow: 131072
+    think: medium
+    costClass: free
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 2048

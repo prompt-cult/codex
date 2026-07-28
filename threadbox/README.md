@@ -1,178 +1,112 @@
 # ThreadBox
 
-ThreadBox turns a natural-language description of a repetitive task into a
-**reviewable, replayable plan**, and keeps producing the plan strictly separate
-from running it.
+ThreadBox is an agent-DSL for expressing composable, statically-shaped
+work graphs (fork/join, parallel review, bounded loops, scheduled
+digests) in AssemblyScript, compiled to Wasm and executed inside a
+`wasmi` host that calls back out to sandboxed `codex exec` agents and
+capability-registry-only I/O.
 
-The plan is a directed acyclic graph — an intermediate representation, the IR.
-It is produced by compiling a small AssemblyScript program to WebAssembly and
-running that module in a memory-capped sandbox, where its only permitted effect
-is to serialize the graph it built. **Nothing in the graph executes while the
-graph is being produced.** Executing the graph is a later, separate concern and
-is not part of this repository yet.
+This folder is **Phase 1 only**: a `promptfoo`-driven kata harness that
+answers one question before any runtime is built — *can candidate
+models actually write this DSL correctly?* There is no Rust code here
+and no Wasm execution; grading is done by type-checking (`asc
+--noEmit`), structural fingerprinting, and static lint.
 
-## The motivating problem
+Phase 1 owns its provider policy rather than routing through Codex.
+OpenCode Zen, OpenCode Go, Mistral, and Groq are selected through a
+curated allowlist in `eval-harness/models.yaml`. DSL programs identify
+logical roles such as `plan`, `code`, `review`, and `summarize`; they
+never choose unrestricted model IDs or provider URLs.
 
-A caseworker submission arrives as JSON. It must be keyed into a legacy grants
-application that has no API, is only reachable over a VPN, and whose HTML is
-pathological. This happens hundreds of times a year.
-
-A browser-extension agent that rediscovers the form layout on every run pays for
-that reasoning on every run. ThreadBox does the reasoning once, in the design
-loop, and produces a plan that can be replayed cheaply — after a human or a
-panel of models has read it.
-
-## Three artifacts, one boundary
-
-| Artifact | Where | What it does |
-|---|---|---|
-| The DSL | `guest/assembly/` | AssemblyScript library. Its only purpose is to build the graph in the guest's own linear memory. |
-| `tb-design` | `rust/design/` | Drives a model until the AssemblyScript it writes type-checks, logging every attempt. |
-| `tb-run` | `rust/runner/` | Instantiates the compiled module under `wasmi`, captures the emitted graph, validates it structurally, prints it. |
-
-Exactly one function crosses from guest to host:
-
-| Module | Function | Parameters | Returns |
-|---|---|---|---|
-| `threadbox.ir.v1` | `emit` | `ptr: usize, len: i32` | `void` |
-
-The guest calls it once, at the end of `main`. The host reads `len` bytes from
-guest linear memory and the guest is finished. No handles cross the boundary, no
-callbacks cross the boundary, and the host offers no clock, randomness,
-filesystem, or network.
-
-Because the vocabulary of combinators lives entirely in a guest library rather
-than in the import table, adding a combinator is a library change and not a
-versioned ABI migration. Any change to the row above is breaking and takes a
-version bump in the module name, never an in-place edit.
-
-## Flow
-
-```mermaid
-flowchart TD
-  S["scenario prompt"] --> D["tb-design"]
-  D -->|"spawns codex exec"| M["model writes AssemblyScript,\nruns asc --noEmit, iterates"]
-  M -->|"converged source"| P["guest program"]
-  P -->|"asc build"| W["module.wasm"]
-  W --> R["tb-run: wasmi instantiate"]
-  R -->|"emit(ptr,len)"| B["serialized graph bytes"]
-  B --> V["four structural validators"]
-  V -->|"fail"| X["diagnostics, exit 1"]
-  V -->|"pass"| J["graph printed to stdout"]
-  J --> G["harness: graded / reviewed"]
-```
-
-Compiling successfully earns a program the right to be inspected, nothing more.
-A graph that fails any validator is not run. A graph that passes is *eligible*
-to be reviewed, which is a separate judgement.
+See the top-level plan (`submit_plan` output from the ThreadBox
+planning session) for the full 14-phase roadmap. This README only
+covers what exists in this folder today.
 
 ## Layout
 
 ```
 threadbox/
-  README.md   this file
-  AGENTS.md   conventions and verification commands
-  DSL.md      the language: every construct, worked example
-  IR.md       the graph: node schema, serialized form, validators
-  guest/      AssemblyScript library, examples, golden tests
-  rust/       standalone Cargo workspace: threadbox-ir, tb-design, tb-run
-  harness/    catalogs, policy, provider adapters, graders, scenarios
-  skills/     the instruction file fed to the design loop
+  sdk/
+    assembly/threadbox.d.ts   # hand-written AS type declarations (primitives-only ABI)
+    assembly/ABI.md           # @external module/function names + param order (canonical reference)
+    package.json              # pins assemblyscript version used for `asc --noEmit`
+  eval-harness/
+    package.json              # pins promptfoo (separate from sdk's package.json on purpose)
+    models.yaml               # provider allowlist, profiles, and role aliases
+    promptfooconfig.yaml       # providers x prompts x graders matrix
+    providers/                 # provider policy and wire-protocol adapters
+    prompts/
+      system.md                # SDK docs + 2 worked reference examples, injected into every kata
+      kata-s1.md               # parallel review of the current change (fork/join/rank)
+      kata-s2.md                # diagnose a failing test (independent investigators join)
+      kata-s4.md                # release notes (2-source, 2-agent fan-out then join+dedupe)
+      kata-s6.md                # service health (3-way endpoint() fanout)
+    graders/
+      grade.mjs                 # extract code -> asc --noEmit -> fingerprint -> lint (3-stage gate)
+      check-structure.mjs       # structural fingerprint matcher used by grade.mjs
+    fingerprints/
+      s1.json s2.json s4.json s6.json   # required-call-set + node/join counts per kata
+    examples/
+      parallel-review.ts        # worked reference solution for kata-s1 (used in system.md)
+      health-check.ts           # worked reference solution for kata-s6 (used in system.md)
+    RESULTS.md                  # populated after `promptfoo eval` runs
 ```
 
-Two package manifests exist deliberately. `guest/package.json` pins the compiler
-that decides *is this valid AssemblyScript*; `harness/package.json` pins the
-tooling that decides *how do we run the evaluation matrix*. They move on
-different schedules and must not pin each other.
+## Why two `package.json` files
 
-`rust/` is a standalone workspace, not a member of `codex-rs`. It must stay
-extractable: copying the directory elsewhere and running `cargo test` has to
-work with no edits.
+`sdk/package.json` pins the `assemblyscript` compiler version used only
+for `asc --noEmit` type-checking of generated solutions. `eval-harness/package.json`
+pins `promptfoo` and any lint deps. Keeping them separate prevents
+toolchain version drift between "does this parse as valid AS" and
+"how do we run the eval matrix" — the two concerns evolve on different
+schedules (AS compiler bumps vs promptfoo config changes).
 
-## Running it
+## What "green" means for Phase 1
 
-```sh
-# type-check every guest source
-cd guest && npx asc assembly/ir.ts --noEmit
+`promptfoo eval` using the `eco` profile passes for at least 2
+providers x 2 katas. The full Zen, Go, Mistral, and Groq x 4-kata
+matrix is a stretch goal tracked in `RESULTS.md`, not a blocking gate.
 
-# produce and validate a graph from the reference program
-cargo run --manifest-path rust/Cargo.toml --bin tb-run -- guest/examples/grants-entry.ts
+## Model policy
 
-# drive a model until its AssemblyScript type-checks
-cargo run --manifest-path rust/Cargo.toml --bin tb-design -- --scenario grants-entry
+Three named profiles provide operator-owned defaults:
 
-# the evaluation matrix
-cd harness && npm test
-```
+- `eco` uses free, subscription, or economical models for continuous
+  regression.
+- `balanced` uses stronger open models while avoiding premium models
+  by default.
+- `performance` permits premium models for demonstrations and
+  explicitly requested high-quality runs.
 
-## Model selection
+Resolution precedence is:
 
-A program never names a concrete model in an operational sense. It states
-intent — a tier, or an explicit subset of vendor, model, reasoning effort,
-context window, and driver — and the record it produces is inert. Resolution
-happens outside the guest against two files with different owners:
+1. `THREADBOX_FORCE_MODEL` forces one enabled, allowlisted model for
+   every compatible role.
+2. `THREADBOX_ROLE_<ROLE>` overrides one logical role.
+3. `THREADBOX_PROFILE` selects a named profile.
+4. `defaultProfile` in `models.yaml` is used otherwise.
 
-| File | Owner | Answers |
-|---|---|---|
-| `harness/catalogs/<driver>.yaml` | driver author | what does this driver currently serve? |
-| `harness/policy.yaml` | operator | which logical tier and role maps to which catalog entry? |
+Unknown, disabled, incompatible, or over-budget selections fail before
+any network call. Generated AssemblyScript cannot change this policy.
 
-Roles are `plan`, `code`, `review`, `summarize`. Tiers are `eco`, `balanced`,
-`performance`. Resolution precedence, highest first: a forced single model, a
-per-role override, a selected tier, the policy default tier. Unknown, disabled,
-incompatible, or over-budget selections fail before any network call — including
-when forced. Generated code cannot alter this.
+## Provider keys
 
-Retiring a model is therefore a catalog edit and never a change to any program.
+Provider secrets are read only from environment variables:
 
-## Agent chaining and data reshaping
+- `OPENCODE_API_KEY` for both OpenCode Zen and OpenCode Go.
+- `MISTRAL_API_KEY` for Mistral.
+- `GROQ_API_KEY` for Groq.
 
-The twelve original node kinds describe vision-driven browser automation.
-Two additional kinds extend the vocabulary to agent-to-agent pipelines — model
-calls that produce text or structured data, and host-evaluated structural
-queries that reshape it — without altering the DAG contract, the single
-`Publish` terminal, or the zero-dependency Rust reader.
+The provider layer never prints keys or authorization headers. The
+local `.env` file is for development only and must remain ignored.
+Direct Moonshot, Anthropic, and OpenAI providers are deferred.
 
-| Kind | Purpose |
-|---|---|
-| `Prompt` | Send a prompt (literal text or a named template key) to a model and receive text or JSON. |
-| `Transform` | Reshape data with a host-evaluated jq/xq expression. Never guest-computed. |
+## Non-goals for this folder
 
-**Prompt templates** follow the same discriminator pattern as `Type`'s
-`valueKind`. A `promptKind: "literal"` node carries the template text directly
-in the graph. A `promptKind: "name"` node carries a logical key that the host
-resolves against operator-owned configuration at execution time — exactly as
-`LoadJson`'s `name` field resolves a named document. No literal path, URL, or
-credential ever appears in the graph.
-
-**Model call chaining** uses the same cursor idiom as the rest of the DSL. A
-call returns a `Step` whose output is declared to be text or JSON via a
-mandatory finalizer; downstream nodes reference that `Step` as a parent,
-exactly as they reference a `LoadJson` or a `Locate`.
-
-**Data reshaping** is always host-side. A jq/xq expression is recorded as an
-opaque string in a `Transform` node. The host evaluates it at execution time.
-The guest never parses, composes, or inspects jq expressions.
-
-**Bounded iteration over model output** reuses the existing `ForEach` node.
-When a `ForEach`'s source is a `Prompt` returning JSON, or a `Transform`, the
-body subgraph runs once per element of the output array. Boundedness is
-guaranteed by the finite length of the model output and, for the
-flatMap-equivalent reshape, by a required literal element-count bound.
-
-These constructs compose with `Retry` and `Fallback` for bounded repetition
-and escalation, exactly as `Locate` and `Verify` do today. See `DSL.md` and
-`IR.md` for the full vocabulary, node schema, and worked example.
-
-The "no arithmetic, no string manipulation, no comparison operators on
-document values" rule remains in force for everything the guest controls.
-Template placeholder substitution and jq evaluation both happen host-side.
-The guest describes *what* to compute, not *how* to compute it. The graph is
-still a plan, still acyclic, and still terminates by structural inspection.
-
-## Not in scope here
-
-Executing the graph. Any encoding beyond the one documented serialized form.
-Wiring real vision or audio transports. Reading a serialized graph back into a
-runnable structure. Persistence, scheduling, or a daemon. Any change to
-`codex-rs`.
+- No Wasm compilation (`asc --noEmit` only, never full `asc` codegen).
+- No wasmi runtime, no callback dispatch, no sandboxed `asc` execution.
+- No Codex or zen-proxy changes. Phase 1 calls provider endpoints
+  through ThreadBox's own small adapters.
+- No dynamic graph mutation, no persistence, no daemon. Those are
+  later phases against `codex-threadbox-core` (a genuine Rust crate,
+  not yet created).

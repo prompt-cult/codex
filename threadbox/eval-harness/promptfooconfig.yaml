@@ -1,0 +1,73 @@
+# ThreadBox Phase 1 kata eval: providers x katas x 3-stage grader.
+#
+# Run with: npx promptfoo eval   (from this directory)
+#
+# Providers use ThreadBox's curated model policy and wire adapters.
+# Routine evaluation defaults to the eco profile. Operators can set
+# THREADBOX_PROFILE, THREADBOX_ROLE_<ROLE>, or THREADBOX_FORCE_MODEL.
+#
+# Green-when (Phase 1 hard gate; see README.md "What green means"):
+# promptfoo eval passes for at least 2 providers x 2 katas. The full
+# 4x4 matrix is a stretch goal, not a blocking gate, because
+# third-party endpoint availability/cost is outside our control.
+
+description: "ThreadBox Phase 1 -- agent-dsl kata harness"
+
+# Single template used for every test case. The per-kata task text is
+# injected via the `kataPrompt` var (see tests below) so the SDK docs
+# and worked examples in system.md are never duplicated per kata.
+prompts:
+  - file://prompts/system.md
+
+providers:
+  # Model selection is driven by role + THREADBOX_PROFILE (default: eco).
+  # `label` is only a display hint; the resolved model comes from models.yaml.
+  - id: file://providers/threadbox-provider.mjs
+    label: role-review
+    config:
+      role: review
+
+  - id: file://providers/threadbox-provider.mjs
+    label: role-code
+    config:
+      role: code
+
+  - id: file://providers/threadbox-provider.mjs
+    label: role-plan
+    config:
+      role: plan
+
+  - id: file://providers/threadbox-provider.mjs
+    label: role-summarize
+    config:
+      role: summarize
+
+# Cost/rate-limit guard for third-party endpoints (see plan "Key risks").
+evaluateOptions:
+  maxConcurrency: 2
+
+defaultTest:
+  assert:
+    - type: javascript
+      value: file://graders/grade.mjs
+
+tests:
+  - description: "kata-s1: parallel review of the current change (fork/join/rank)"
+    vars:
+      kataId: s1
+      kataPrompt: file://prompts/kata-s1.md
+
+  - description: "kata-s2: diagnose a failing test (independent investigators join)"
+    vars:
+      kataId: s2
+      kataPrompt: file://prompts/kata-s2.md
+
+  - description: "kata-s4: release notes (2-source, 2-agent fan-out then join+dedupe)"
+    vars:
+      kataId: s4
+      kataPrompt: file://prompts/kata-s4.md
+
+  - description: "kata-s6: service health (3-way endpoint() fanout)"
+    vars:
+      kataId: s6
+      kataPrompt: file://prompts/kata-s6.md

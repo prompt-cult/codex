@@ -1,0 +1,119 @@
+# OpenCode Zen driver catalog.
+#
+# Owner: driver author. Replaced wholesale when Zen adds or retires
+# models. Every `model:` below was verified against the authenticated
+# GET https://opencode.ai/zen/v1/models response for catalogVersion.
+driver: opencode-zen
+catalogVersion: 2026-07-27
+baseUrl: https://opencode.ai/zen/v1
+apiKeyEnv: OPENCODE_API_KEY
+models:
+  free-open:
+    model: ling-3.0-flash-free
+    wire: chat-completions
+    vendor: inclusionai
+    contextWindow: 131072
+    think: none
+    costClass: free
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 2048
+
+  nemotron-free:
+    model: nemotron-3-ultra-free
+    wire: chat-completions
+    vendor: nvidia
+    contextWindow: 131072
+    think: low
+    costClass: free
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 2048
+
+  haiku-eco:
+    model: claude-haiku-4-5
+    wire: messages
+    vendor: anthropic
+    contextWindow: 200000
+    think: low
+    costClass: low
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 2048
+
+  gemini-flash-lite:
+    model: gemini-3.5-flash-lite
+    wire: gemini
+    vendor: google
+    contextWindow: 1000000
+    think: none
+    costClass: low
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 2048
+
+  gemini-flash:
+    model: gemini-3.6-flash
+    wire: gemini
+    vendor: google
+    contextWindow: 1000000
+    think: medium
+    costClass: standard
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 4096
+
+  qwen-code:
+    model: qwen3.6-plus
+    wire: chat-completions
+    vendor: alibaba
+    contextWindow: 262144
+    think: low
+    costClass: low
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 2048
+
+  sonnet-balanced:
+    model: claude-sonnet-5
+    wire: messages
+    vendor: anthropic
+    contextWindow: 1000000
+    think: medium
+    costClass: standard
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 4096
+
+  gpt-terra:
+    model: gpt-5.6-terra
+    wire: responses
+    vendor: openai
+    contextWindow: 400000
+    think: medium
+    costClass: standard
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 4096
+
+  gpt-sol:
+    model: gpt-5.6-sol
+    wire: responses
+    vendor: openai
+    contextWindow: 400000
+    think: high
+    costClass: premium
+    roles: [plan, code, review]
+    maxOutputTokens: 4096
+
+  gpt-luna:
+    model: gpt-5.6-luna
+    wire: responses
+    vendor: openai
+    contextWindow: 400000
+    think: high
+    costClass: premium
+    roles: [plan, code, review]
+    maxOutputTokens: 4096
+
+  opus-performance:
+    model: claude-opus-5
+    wire: messages
+    vendor: anthropic
+    contextWindow: 1000000
+    think: high
+    costClass: premium
+    roles: [plan, code, review]
+    maxOutputTokens: 4096

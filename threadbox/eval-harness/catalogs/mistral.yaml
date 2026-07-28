@@ -1,0 +1,28 @@
+# Mistral driver catalog.
+#
+# Mistral is not carried by OpenCode and supplies the small MoE and
+# sub-32B dense models that domain-specific agents need.
+driver: mistral
+catalogVersion: 2026-07-27
+baseUrl: https://api.mistral.ai/v1
+apiKeyEnv: MISTRAL_API_KEY
+models:
+  small:
+    model: mistral-small-latest
+    wire: chat-completions
+    vendor: mistral
+    contextWindow: 131072
+    think: none
+    costClass: low
+    roles: [plan, code, review, summarize]
+    maxOutputTokens: 2048
+
+  large:
+    model: mistral-large-latest
+    wire: chat-completions
+    vendor: mistral
+    contextWindow: 131072
+    think: medium
+    costClass: premium
+    roles: [plan, code, review]
+    maxOutputTokens: 4096
