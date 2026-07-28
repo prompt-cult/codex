@@ -1,0 +1,29 @@
+{
+  "ir": "threadbox.ir.v1",
+  "nodes": [
+    {"i":0,  "kind":"Screenshot", "parents":[]},
+    {"i":1,  "kind":"Scale",      "parents":[0], "width":1280},
+    {"i":2,  "kind":"Locate",     "parents":[1], "description":"the search input"},
+    {"i":3,  "kind":"Click",      "parents":[2]},
+    {"i":4,  "kind":"Type",       "parents":[3], "valueKind":"literal", "value":"Jane"},
+    {"i":5,  "kind":"Screenshot", "parents":[4]},
+    {"i":6,  "kind":"Scale",      "parents":[5], "width":1280},
+    {"i":7,  "kind":"Locate",     "parents":[6], "description":"the row for Jane Doe"},
+    {"i":8,  "kind":"Click",      "parents":[7]},
+    {"i":9,  "kind":"Screenshot", "parents":[8]},
+    {"i":10, "kind":"Scale",      "parents":[9], "width":1280},
+    {"i":11, "kind":"Locate",     "parents":[10], "description":"the Edit button"},
+    {"i":12, "kind":"Click",      "parents":[11]},
+    {"i":13, "kind":"Screenshot", "parents":[12]},
+    {"i":14, "kind":"Scale",      "parents":[13], "width":1280},
+    {"i":15, "kind":"Locate",     "parents":[14], "description":"the address input field"},
+    {"i":16, "kind":"Click",      "parents":[15]},
+    {"i":17, "kind":"Type",       "parents":[16], "valueKind":"literal", "value":"123 New Street"},
+    {"i":18, "kind":"Screenshot", "parents":[17]},
+    {"i":19, "kind":"Scale",      "parents":[18], "width":1280},
+    {"i":20, "kind":"Locate",     "parents":[19], "description":"the Save button"},
+    {"i":21, "kind":"Click",      "parents":[20]},
+    {"i":22, "kind":"Verify",     "parents":[21], "assertion":"Contact saved banner is visible"},
+    {"i":23, "kind":"Publish",    "parents":[22]}
+  ]
+}
