@@ -1,15 +1,19 @@
 {
-  "name": "threadbox-browser-runtime",
+  "name": "threadbox",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "codegen": "node tools/codegen.mjs",
     "check": "npm --prefix guest run check",
-    "build:wasm": "npm --prefix guest run build",
-    "package:extension": "node tools/package-extension.mjs",
-    "build": "npm run build:wasm && npm run package:extension",
-    "test:guest": "npm --prefix guest test",
-    "test:extension": "node --test extension/tests/*.test.mjs",
-    "test": "npm run check && npm run test:guest && npm run build && npm run test:extension"
+    "build:evaluator": "cargo build --release --target wasm32-unknown-unknown --manifest-path evaluator/Cargo.toml",
+    "build:graph": "npm --prefix guest run build && node guest/emit-ir.mjs guest/build/acme-motor-quotes.wasm guest/build/acme-motor-quotes.ir.json",
+    "build": "npm run codegen && npm run build:evaluator && npm run build:graph",
+    "validate": "cargo run --quiet --manifest-path evaluator/Cargo.toml --example validate -- guest/build/acme-motor-quotes.ir.json",
+    "test:schemas": "node --test tools/tests/*.test.mjs",
+    "test:twin": "node --test harness/twin/tests/*.test.mjs",
+    "test:evaluator": "cargo test --manifest-path evaluator/Cargo.toml",
+    "test:e2e": "node --test host-node/tests/*.test.mjs",
+    "test": "npm run codegen && npm run test:schemas && npm run test:twin && npm run test:evaluator && npm run build && npm run validate && npm run test:e2e"
   }
 }

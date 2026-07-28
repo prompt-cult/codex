@@ -1,0 +1,9 @@
+{
+  "properties": {
+    "proposalId": { "type": "string" },
+    "navigationId": { "type": "string" },
+    "handle": { "type": "string" },
+    "value": { "type": "string" },
+    "clearFirst": { "type": "boolean" }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "submissionId": "amq-2026-000418",
+  "driver": {
+    "firstName": "Priya",
+    "lastName": "Ramanathan",
+    "dateOfBirth": "1988-03-14",
+    "licenceType": "full-uk",
+    "licenceYears": 12,
+    "occupation": "Structural Engineer"
+  },
+  "vehicle": {
+    "registration": "KT19 XPB",
+    "make": "Skoda",
+    "model": "Octavia Estate",
+    "yearOfManufacture": 2019,
+    "estimatedValue": 11450,
+    "parkedAt": "driveway"
+  },
+  "cover": {
+    "type": "comprehensive",
+    "startDate": "2026-08-15",
+    "voluntaryExcess": 250,
+    "annualMileage": 9000,
+    "noClaimsYears": 7
+  },
+  "contact": {
+    "email": "p.ramanathan@example.invalid",
+    "phone": "07700 900418",
+    "postcode": "BS8 4TR"
+  },
+  "answers": [
+    { "id": "first-name",   "step": 1, "accessibleName": "First name",            "description": "the first name text box in the About you panel",              "value": "Priya",                        "control": "text" },
+    { "id": "last-name",    "step": 1, "accessibleName": "Last name",             "description": "the last name text box in the About you panel",               "value": "Ramanathan",                   "control": "text" },
+    { "id": "dob",          "step": 1, "accessibleName": "Date of birth",         "description": "the date of birth field in the About you panel",              "value": "1988-03-14",                   "control": "date" },
+    { "id": "email",        "step": 1, "accessibleName": "Email address",         "description": "the email address text box",                                  "value": "p.ramanathan@example.invalid", "control": "text" },
+    { "id": "phone",        "step": 1, "accessibleName": "",                      "description": "the unlabelled telephone number box directly under the email address box", "value": "07700 900418",     "control": "text" },
+    { "id": "postcode",     "step": 1, "accessibleName": "Postcode",              "description": "the postcode text box",                                       "value": "BS8 4TR",                      "control": "text" },
+
+    { "id": "registration", "step": 2, "accessibleName": "Registration number",   "description": "the vehicle registration text box",                           "value": "KT19 XPB",                     "control": "text" },
+    { "id": "make",         "step": 2, "accessibleName": "Make",                  "description": "the vehicle make dropdown",                                   "value": "Skoda",                        "control": "select" },
+    { "id": "model",        "step": 2, "accessibleName": "Model",                 "description": "the vehicle model text box",                                  "value": "Octavia Estate",               "control": "text" },
+    { "id": "year",         "step": 2, "accessibleName": "Year of manufacture",   "description": "the year of manufacture box",                                 "value": "2019",                         "control": "text" },
+    { "id": "value",        "step": 2, "accessibleName": "",                      "description": "the estimated value box in the Your vehicle panel, to the right of the year of manufacture box", "value": "11450", "control": "text" },
+    { "id": "parked-at",    "step": 2, "accessibleName": "Where is it kept overnight",         "description": "the overnight parking dropdown",                  "value": "driveway",                     "control": "select" },
+
+    { "id": "cover-type",   "step": 3, "accessibleName": "Cover type",            "description": "the cover type dropdown",                                     "value": "comprehensive",                "control": "select" },
+    { "id": "start-date",   "step": 3, "accessibleName": "Cover start date",      "description": "the cover start date field",                                  "value": "2026-08-15",                   "control": "date" },
+    { "id": "excess",       "step": 3, "accessibleName": "Voluntary excess",      "description": "the voluntary excess dropdown",                               "value": "250",                          "control": "select" },
+    { "id": "mileage",      "step": 3, "accessibleName": "Annual mileage",        "description": "the annual mileage box",                                      "value": "9000",                         "control": "text" },
+    { "id": "ncd",          "step": 3, "accessibleName": "Years no claims",       "description": "the years no claims dropdown",                                "value": "7",                            "control": "select" }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "properties": {
+    "v": { "type": "uint32" },
+    "kind": { "enum": ["tool.response"] },
+    "id": { "type": "string" },
+    "ok": { "type": "boolean" }
+  },
+  "optionalProperties": {
+    "body": {},
+    "error": {
+      "properties": {
+        "code": { "type": "string" },
+        "retryable": { "type": "boolean" },
+        "message": { "type": "string" }
+      },
+      "optionalProperties": {
+        "requiresFreshObservation": { "type": "boolean" }
+      }
+    }
+  }
+}

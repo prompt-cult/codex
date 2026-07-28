@@ -1,0 +1,16 @@
+{
+  "properties": {
+    "artifactId": { "type": "string" },
+    "blobId": { "type": "string" },
+    "logicalPath": { "type": "string" },
+    "name": { "type": "string" },
+    "mediaType": { "type": "string" },
+    "semanticKind": { "enum": ["image", "json", "jsonl", "text", "audio", "pdf"] },
+    "size": { "type": "uint32" },
+    "sha256": { "type": "string" },
+    "readOnly": { "type": "boolean" }
+  },
+  "optionalProperties": {
+    "labels": { "values": { "type": "string" } }
+  }
+}

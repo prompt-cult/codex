@@ -1,67 +1,129 @@
-# ThreadBox browser runtime
+# ThreadBox
 
-ThreadBox is a pre-alpha experiment in running an AssemblyScript-compiled
-WebAssembly core inside a browser extension.
+ThreadBox runs a typed agent DSL as WebAssembly inside a browser extension, to
+drive repetitive data entry into legacy web forms that have no API.
 
-The immediate product problem is repetitive data entry into pathological legacy
-grant-application forms. The eventual system will combine a small, task-specific
-agent DSL with browser-loaded `.mjs` tools, content-script bridges, screenshots,
-GUI localization, and deterministic form operations.
+The expensive reasoning happens once, at design time, and produces a graph. The
+graph is data. Running it is cheap, replayable, and observable.
 
-That DSL does not exist in this checkpoint. It will be designed from the real
-grant-entry workflow rather than inherited from the removed general-purpose
-agent-graph experiments.
+## Two languages, one seam
 
-## What exists
+| Phase | Language | Job |
+|---|---|---|
+| Design time | AssemblyScript | Author the graph. `asc --noEmit` proves it is well-formed before anything runs. Running the module emits the IR. |
+| Run time | Rust → WASM | Evaluate the IR. Hosts the JSON query engine and the JTD validators. |
+
+The seam between them is the IR, and it is a JSON document.
 
 ```text
-AssemblyScript source
-        |
-        v
-browser-compatible WASM
-        |
-        +--> Node tests (development and CI only)
-        |
-        v
-extension/runtime.mjs
-        |
-        v
-Manifest V3 service worker
+acme-motor-quotes.ts ──asc──> .wasm ──run once──> emit(ptr,len) ──> ….ir.json
+                                                                      │
+                                            ┌─────────────────────────┘
+                                            v
+                                 [ evaluator.wasm (Rust) ]
+                                            │  one envelope ABI
+                            ┌───────────────┴───────────────┐
+                            v                               v
+                    host-node (CLI)                 host-extension (MV3)
+                    files · JSON log                storage.session · IndexedDB
+                            │                               │
+                            └───────> digital twin <────────┘
 ```
 
-- `guest/` contains the AssemblyScript compiler pin, one retained coordinate
-  algebra module, and tests that instantiate its WASM with the standard Web
-  `WebAssembly` API.
-- `extension/` contains a minimal Manifest V3 extension runtime. It loads the
-  same WASM artifact tested from Node.
-- `harness/dummy-form/` is a deterministic legacy-CRM fixture with a server-side
-  action log. It is a target for future browser-extension tests.
-- `tools/package-extension.mjs` copies the compiled WASM into the unpacked
-  extension directory.
+The same `evaluator.wasm` runs in both hosts, and the same Rust code runs
+natively under `cargo test`. A CLI test therefore exercises the real code path
+rather than a simulation of it.
+
+## What runs today
+
+`npm test` builds everything and drives the alpha graph against the twin,
+offline and with no live model:
+
+```text
+53 tests — 5 schema, 8 twin, 31 evaluator (Rust), 9 end-to-end
+run ends: success — awaiting_human_final_submit
+oracle:   17 writes, all applied · 2 page advances · 17 checkpoints
+          1 control cleared before writing (the pre-filled one)
+          2 coordinate resolutions (the two controls with no accessible name)
+          4 artifacts (2 raw captures, 2 normalized)
+```
+
+The same run twice in a row produces an identical action log and an identical
+call sequence, because identity is minted deterministically.
+
+## The alpha scenario
+
+**Acme Motor Quotes** is an invented UK car-insurance comparison site, written
+from scratch for this repository. It exists to be difficult: a multi-step quote
+form with randomised element ids, nested legacy markup, and controls that no
+accessible-name lookup can resolve.
+
+A submission JSON carries driver, vehicle, and cover details. The alpha graph
+loads it, validates it, fills the form, verifies each write against a fresh
+observation, measures remaining work, and stops.
+
+It stops at `awaiting_human_final_submit`. There is no tool that submits, in
+any host, at any milestone. Absence is the control.
+
+## Composition, not a script
+
+The graph composes independent nodes. Capture does not know which model will
+read its output. Image transformation does not know where the image goes. A
+model adapter never chooses the next node. A leaf tool never owns control flow.
+
+This is what makes a binding swappable: replacing one vision model with another
+compatible one is a configuration change, not a graph rewrite.
+
+## Layout
+
+```text
+threadbox/
+  schemas/      JTD (RFC 8927) sources — the specification spine
+  guest/        AssemblyScript authoring DSL
+  evaluator/    Rust crate -> evaluator.wasm, plus native tests
+  host-node/    CLI host implementing the ABI
+  extension/    Manifest V3 host implementing the same ABI
+  tools/        allowlisted MJS micro-tools
+  harness/twin/ Acme Motor Quotes and its action-log oracle
+```
+
+Read `ABI.md` for the boundary, `IR.md` for the graph, `DSL.md` for the
+authoring vocabulary, `AGENTS.md` for conventions and verification.
 
 ## Commands
 
-Run from `threadbox/`:
-
 ```sh
-npm run check
-npm run build
-npm test
+npm test                 # codegen, schemas, twin, evaluator, build, validate, e2e
+npm run build            # codegen -> evaluator.wasm -> graph.wasm -> graph.ir.json
+npm run validate         # run the IR validators over the emitted graph
+
+# drive it by hand against a running twin
+node harness/twin/server.mjs 3456 &
+node host-node/run.mjs --strict
+curl -s localhost:3456/log     # the oracle: what actually happened
 ```
 
-Each stage is independently callable and communicates through files and exit
-status. The browser extension never depends on the Rust CLI runtime removed at
-the pivot.
+Each stage communicates through files and exit status, so any of them can be
+run alone. `tools/record-corpus.mjs` regenerates the model fixture corpus.
+
+## Model providers
+
+Model invocation is one generic node. Providers are configuration.
+
+In CI the only registered binding is `fixture`, which answers from a
+content-addressed corpus keyed by the hash of a canonicalised request. Runs are
+therefore deterministic and offline.
+
+Providers are allowlisted by data-residency policy. **A provider whose serving
+path is not on the allowlist is prohibited, and no run may route to it.** This
+is a configuration gate enforced before dispatch, not an instruction in a
+prompt. See `AGENTS.md`.
 
 ## Deliberately absent
 
-- No general-purpose agent graph.
-- No stable DSL or IR.
-- No CLI execution runtime.
-- No provider policy or model catalogue.
-- No production content script.
-- No credentials or live model proxy.
-- No claim that the grant-entry workflow is automated yet.
-
-The next specification should describe the council-form workflow, its browser
-capabilities, and its failure semantics before adding a new DSL.
+- No agent that hardcodes capture → model → click.
+- No ambient filesystem, network, DOM, or browser API for the DSL or a model.
+- No arbitrary JavaScript supplied by a model.
+- No unbounded loops.
+- No final-submit capability.
+- No live provider binding in this milestone.

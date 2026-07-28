@@ -1,0 +1,26 @@
+{
+  "6a1f657a8f0e0335b55d64fbbb887f1605e997e0fd906042691215fc38ef853a": {
+    "binding": "vision.primary",
+    "prompt": "agent-dsl-fs://prompts/locate-control@1",
+    "outputSchemaUri": "agent-dsl://schemas/provider-output/localized-control/0.1.0",
+    "target": "the unlabelled telephone number box directly under the email address box",
+    "response": {
+      "x": 420,
+      "y": 468,
+      "confidence": 0.95,
+      "note": "mock localization of phone"
+    }
+  },
+  "15d013f5b625c71fa13b1d66d4927c9ac01b7eb96904f028a1d1890206396ae8": {
+    "binding": "vision.primary",
+    "prompt": "agent-dsl-fs://prompts/locate-control@1",
+    "outputSchemaUri": "agent-dsl://schemas/provider-output/localized-control/0.1.0",
+    "target": "the estimated value box in the Your vehicle panel, to the right of the year of manufacture box",
+    "response": {
+      "x": 420,
+      "y": 468,
+      "confidence": 0.95,
+      "note": "mock localization of value"
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "properties": {
+    "submissionId": { "type": "string" },
+    "driver": {
+      "properties": {
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "dateOfBirth": { "type": "string" },
+        "licenceType": { "enum": ["full-uk", "provisional-uk", "eu", "international"] },
+        "licenceYears": { "type": "uint32" },
+        "occupation": { "type": "string" }
+      }
+    },
+    "vehicle": {
+      "properties": {
+        "registration": { "type": "string" },
+        "make": { "type": "string" },
+        "model": { "type": "string" },
+        "yearOfManufacture": { "type": "uint32" },
+        "estimatedValue": { "type": "uint32" },
+        "parkedAt": { "enum": ["driveway", "garage", "street", "carpark"] }
+      }
+    },
+    "cover": {
+      "properties": {
+        "type": { "enum": ["comprehensive", "third-party-fire-theft", "third-party"] },
+        "startDate": { "type": "string" },
+        "voluntaryExcess": { "type": "uint32" },
+        "annualMileage": { "type": "uint32" },
+        "noClaimsYears": { "type": "uint32" }
+      }
+    },
+    "contact": {
+      "properties": {
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "postcode": { "type": "string" }
+      }
+    },
+    "answers": {
+      "elements": {
+        "properties": {
+          "id": { "type": "string" },
+          "step": { "type": "uint32" },
+          "accessibleName": { "type": "string" },
+          "description": { "type": "string" },
+          "value": { "type": "string" },
+          "control": { "enum": ["text", "select", "radio", "checkbox", "date"] }
+        }
+      }
+    }
+  }
+}

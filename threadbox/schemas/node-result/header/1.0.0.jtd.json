@@ -1,0 +1,11 @@
+{
+  "properties": {
+    "instanceId": { "type": "string" },
+    "runId": { "type": "string" },
+    "nodeId": { "type": "string" },
+    "nodeInstanceId": { "type": "string" },
+    "callId": { "type": "string" },
+    "sequence": { "type": "uint32" },
+    "status": { "enum": ["success", "failure", "denied", "cancelled"] }
+  }
+}

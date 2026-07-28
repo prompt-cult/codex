@@ -1,10 +1,10 @@
 {
-  "name": "threadbox-browser-wasm",
+  "name": "threadbox-guest",
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "asc assembly/coordinates.ts --noEmit",
-    "build": "asc assembly/coordinates.ts -o assembly/coordinates.wasm --exportRuntime",
+    "check": "asc assembly/dsl.ts --noEmit && asc examples/acme-motor-quotes.ts --noEmit",
+    "build": "asc examples/acme-motor-quotes.ts -o build/acme-motor-quotes.wasm --exportRuntime",
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {

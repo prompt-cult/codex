@@ -1,0 +1,14 @@
+{
+  "properties": {
+    "classification": { "type": "string" },
+    "proposal": {
+      "properties": {
+        "proposalId": { "type": "string" },
+        "handle": { "type": "string" },
+        "expected": { "type": "string" },
+        "classification": { "enum": ["routine", "requires-user", "prohibited"] },
+        "clearFirst": { "type": "boolean" }
+      }
+    }
+  }
+}

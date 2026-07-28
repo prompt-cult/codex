@@ -1,7 +1,0 @@
-{
-  "the search input": "#search",
-  "the row for Jane Doe": "tr[data-name='Jane Doe']",
-  "the Edit button": "#edit",
-  "the address input field": "#address-input",
-  "the Save button": "#save"
-}

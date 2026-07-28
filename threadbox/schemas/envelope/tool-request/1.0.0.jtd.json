@@ -1,0 +1,20 @@
+{
+  "properties": {
+    "v": { "type": "uint32" },
+    "kind": { "enum": ["tool.request"] },
+    "id": { "type": "string" },
+    "instanceId": { "type": "string" },
+    "runId": { "type": "string" },
+    "nodeId": { "type": "string" },
+    "nodeInstanceId": { "type": "string" },
+    "attempt": { "type": "uint32" },
+    "sequence": { "type": "uint32" },
+    "tool": { "type": "string" },
+    "toolVersion": { "type": "string" },
+    "body": {}
+  },
+  "optionalProperties": {
+    "inputSchemaUri": { "type": "string" },
+    "resultSchemaUri": { "type": "string" }
+  }
+}

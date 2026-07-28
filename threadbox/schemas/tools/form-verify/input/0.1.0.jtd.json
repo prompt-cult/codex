@@ -1,0 +1,7 @@
+{
+  "properties": {
+    "navigationId": { "type": "string" },
+    "handle": { "type": "string" },
+    "expected": { "type": "string" }
+  }
+}

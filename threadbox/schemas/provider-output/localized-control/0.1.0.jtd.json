@@ -1,0 +1,10 @@
+{
+  "properties": {
+    "x": { "type": "uint32" },
+    "y": { "type": "uint32" },
+    "confidence": { "type": "float64" }
+  },
+  "optionalProperties": {
+    "note": { "type": "string" }
+  }
+}

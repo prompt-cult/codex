@@ -1,0 +1,6 @@
+{
+  "properties": {
+    "navigationId": { "type": "string" },
+    "accessibleName": { "type": "string" }
+  }
+}

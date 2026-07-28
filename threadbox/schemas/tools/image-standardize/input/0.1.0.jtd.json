@@ -1,0 +1,8 @@
+{
+  "properties": {
+    "sourceArtifactId": { "type": "string" },
+    "standardWidth": { "type": "uint32" },
+    "tileHeight": { "type": "uint32" },
+    "overlap": { "type": "uint32" }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "properties": {
+    "v": { "type": "uint32" },
+    "kind": { "enum": ["run.finished"] },
+    "status": { "enum": ["success", "exhausted", "cancelled", "failure"] },
+    "outcome": { "type": "string" },
+    "sequence": { "type": "uint32" },
+    "summary": {
+      "properties": {
+        "nodesExecuted": { "type": "uint32" },
+        "toolCalls": { "type": "uint32" },
+        "artifacts": { "type": "uint32" }
+      }
+    }
+  }
+}
