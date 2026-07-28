@@ -39,6 +39,16 @@ only thing worth running a test for.
   before the `20260727_pivot` tag. If you find a reference to
   `threadbox.graph.v1`, `NodeHandle`, `Uni<T>`, `Flow`, `threadbox_callback_index`,
   `sdk/`, or `eval-harness/`, it is a defect: delete it, do not adapt it.
+- **No unbounded agent chains.** Every `Prompt` is a single model invocation.
+  The only repetition is `Retry` with a literal bound, or `ForEach` over a
+  finite array. The flatMap-equivalent reshape requires a literal
+  element-count bound.
+- **No reactive-stream vocabulary.** New data-flow constructs are named
+  `project`, `select`, and `expand` (see `DSL.md`), not `map`/`filter`/
+  `flatMap`. Names like `Stream`, `Observable`, `Flow`, `Pipeline`, `Uni`, or
+  `Multi` (beyond the existing `Multi.over(...)` entry point) are forbidden
+  for new constructs, for the same reason `Uni<T>` is already denylisted
+  above: this is not a reactive-programming system.
 
 ## Documentation before code
 
@@ -88,6 +98,19 @@ row.
 - Exactly one `.publish()` per program. The guest asserts this before emitting.
 - Documentation comments use `///`.
 - No magic numbers: use the named constants in `models.ts`.
+- `.asText()` / `.asJSON()` is the mandatory finalizer on every model-call
+  builder (`ask()` / `askName()`). Omitting it is a compile-time type error,
+  not a runtime check.
+- Transform expressions (`project`/`select`/`expand`) are single string
+  literals passed through to the host unexamined. The guest must not parse,
+  compose, or concatenate a jq/xq expression at construction time.
+- New discriminators (`promptKind`, `responseKind`, the transform op name)
+  are named constants in a `models.ts`-style module — no magic strings in a
+  node-construction call.
+- There is no dedicated "checkpoint" or "memento" node. A `Step` held in a
+  named `const` is already a reusable handle to an earlier point in the
+  graph — see the worked example in `DSL.md`. Do not add an identity node
+  whose only purpose is to be referenced later.
 
 ## Rust style
 
@@ -104,6 +127,11 @@ row.
 - Public API entry points validate inputs and return descriptive errors: what
   constraint was violated, the actual value, and what was expected. `assert!` is
   for internal invariants only.
+- jq/xq evaluation is a host-side concern, exactly like model resolution and
+  named-document loading. `threadbox-ir` validates a `Transform` node's `expr`
+  only for non-emptiness at parse time; it never adds a jq engine dependency,
+  and the crate stays zero-dependency regardless of how many transform-shaped
+  node kinds the DSL grows.
 
 ## Error message standard
 

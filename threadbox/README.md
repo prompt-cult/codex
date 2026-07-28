@@ -125,6 +125,51 @@ when forced. Generated code cannot alter this.
 
 Retiring a model is therefore a catalog edit and never a change to any program.
 
+## Agent chaining and data reshaping
+
+The twelve original node kinds describe vision-driven browser automation.
+Two additional kinds extend the vocabulary to agent-to-agent pipelines — model
+calls that produce text or structured data, and host-evaluated structural
+queries that reshape it — without altering the DAG contract, the single
+`Publish` terminal, or the zero-dependency Rust reader.
+
+| Kind | Purpose |
+|---|---|
+| `Prompt` | Send a prompt (literal text or a named template key) to a model and receive text or JSON. |
+| `Transform` | Reshape data with a host-evaluated jq/xq expression. Never guest-computed. |
+
+**Prompt templates** follow the same discriminator pattern as `Type`'s
+`valueKind`. A `promptKind: "literal"` node carries the template text directly
+in the graph. A `promptKind: "name"` node carries a logical key that the host
+resolves against operator-owned configuration at execution time — exactly as
+`LoadJson`'s `name` field resolves a named document. No literal path, URL, or
+credential ever appears in the graph.
+
+**Model call chaining** uses the same cursor idiom as the rest of the DSL. A
+call returns a `Step` whose output is declared to be text or JSON via a
+mandatory finalizer; downstream nodes reference that `Step` as a parent,
+exactly as they reference a `LoadJson` or a `Locate`.
+
+**Data reshaping** is always host-side. A jq/xq expression is recorded as an
+opaque string in a `Transform` node. The host evaluates it at execution time.
+The guest never parses, composes, or inspects jq expressions.
+
+**Bounded iteration over model output** reuses the existing `ForEach` node.
+When a `ForEach`'s source is a `Prompt` returning JSON, or a `Transform`, the
+body subgraph runs once per element of the output array. Boundedness is
+guaranteed by the finite length of the model output and, for the
+flatMap-equivalent reshape, by a required literal element-count bound.
+
+These constructs compose with `Retry` and `Fallback` for bounded repetition
+and escalation, exactly as `Locate` and `Verify` do today. See `DSL.md` and
+`IR.md` for the full vocabulary, node schema, and worked example.
+
+The "no arithmetic, no string manipulation, no comparison operators on
+document values" rule remains in force for everything the guest controls.
+Template placeholder substitution and jq evaluation both happen host-side.
+The guest describes *what* to compute, not *how* to compute it. The graph is
+still a plan, still acyclic, and still terminates by structural inspection.
+
 ## Not in scope here
 
 Executing the graph. Any encoding beyond the one documented serialized form.
