@@ -66,25 +66,11 @@ async function handle(req, res) {
   if (req.method === "GET" && url.pathname === "/contact.html") {
     return serveFile(res, resolve(directory, "public/contact.html"), "text/html; charset=utf-8");
   }
-  if (req.method === "GET" && url.pathname === "/runtime-lab.html") {
-    return serveFile(
-      res,
-      resolve(directory, "public/runtime-lab.html"),
-      "text/html; charset=utf-8",
-    );
-  }
   if (req.method === "GET" && url.pathname === "/extension/runtime.mjs") {
     return serveFile(
       res,
       resolve(directory, "../../extension/runtime.mjs"),
       "text/javascript; charset=utf-8",
-    );
-  }
-  if (req.method === "GET" && url.pathname === "/extension/wasm/coordinates.wasm") {
-    return serveFile(
-      res,
-      resolve(directory, "../../extension/wasm/coordinates.wasm"),
-      "application/wasm",
     );
   }
   if (req.method === "GET" && url.pathname === "/contacts.json") {
