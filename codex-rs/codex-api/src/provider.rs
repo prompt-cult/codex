@@ -4,7 +4,7 @@ use codex_client::RetryOn;
 use codex_client::RetryPolicy;
 use http::Method;
 use http::header::HeaderMap;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::time::Duration;
 use url::Url;
 
@@ -43,7 +43,7 @@ impl RetryConfig {
 pub struct Provider {
     pub name: String,
     pub base_url: String,
-    pub query_params: Option<HashMap<String, String>>,
+    pub query_params: Option<BTreeMap<String, String>>,
     pub headers: HeaderMap,
     pub retry: RetryConfig,
     pub stream_idle_timeout: Duration,

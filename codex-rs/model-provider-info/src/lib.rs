@@ -18,6 +18,7 @@ use http::header::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::time::Duration;
@@ -93,15 +94,15 @@ pub struct ModelProviderInfo {
     #[serde(default)]
     pub wire_api: WireApi,
     /// Optional query parameters to append to the base URL.
-    pub query_params: Option<HashMap<String, String>>,
+    pub query_params: Option<BTreeMap<String, String>>,
     /// Additional HTTP headers to include in requests to this provider where
     /// the (key, value) pairs are the header name and value.
-    pub http_headers: Option<HashMap<String, String>>,
+    pub http_headers: Option<BTreeMap<String, String>>,
     /// Optional HTTP headers to include in requests to this provider where the
     /// (key, value) pairs are the header name and _environment variable_ whose
     /// value should be used. If the environment variable is not set, or the
     /// value is empty, the header will not be included in the request.
-    pub env_http_headers: Option<HashMap<String, String>>,
+    pub env_http_headers: Option<BTreeMap<String, String>>,
     /// Maximum number of times to retry a failed HTTP request to this provider.
     pub request_max_retries: Option<u64>,
     /// Number of times to retry reconnecting a dropped streaming response before failing.
@@ -155,8 +156,8 @@ impl ModelProviderInfo {
     }
 
     fn build_header_map(&self) -> CodexResult<HeaderMap> {
-        let capacity = self.http_headers.as_ref().map_or(0, HashMap::len)
-            + self.env_http_headers.as_ref().map_or(0, HashMap::len);
+        let capacity = self.http_headers.as_ref().map_or(0, BTreeMap::len)
+            + self.env_http_headers.as_ref().map_or(0, BTreeMap::len);
         let mut headers = HeaderMap::with_capacity(capacity);
         if let Some(extra) = &self.http_headers {
             for (k, v) in extra {
