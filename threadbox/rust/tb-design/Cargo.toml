@@ -1,0 +1,10 @@
+[package]
+name = "tb-design"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "tb-design"
+path = "src/main.rs"
+
+[dependencies]

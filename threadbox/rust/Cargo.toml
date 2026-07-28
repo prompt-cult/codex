@@ -1,0 +1,3 @@
+[workspace]
+resolver = "2"
+members = ["threadbox-ir", "tb-run", "tb-design"]

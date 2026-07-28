@@ -1,0 +1,12 @@
+{
+  "name": "threadbox-guest",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "asc assembly/ir.ts --noEmit && asc assembly/emit.ts --noEmit && asc assembly/models.ts --noEmit",
+    "test": "node --test tests/"
+  },
+  "dependencies": {
+    "assemblyscript": "0.28.20"
+  }
+}

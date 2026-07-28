@@ -1,0 +1,12 @@
+[package]
+name = "tb-run"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "tb-run"
+path = "src/main.rs"
+
+[dependencies]
+threadbox-ir = { path = "../threadbox-ir" }
+wasmi = "0.31"
