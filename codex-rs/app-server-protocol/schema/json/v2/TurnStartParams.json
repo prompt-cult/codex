@@ -100,11 +100,22 @@
     },
     "ModeKind": {
       "description": "Initial collaboration mode to use when the TUI starts.",
-      "enum": [
-        "plan",
-        "default"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "plan",
+            "default"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Ask mode: no tools sent to the model. Pure Q&A with full codebase context. Faster and cheaper than Default or Plan modes. Type `/ask` to activate, or press Shift+Tab to cycle through modes.",
+          "enum": [
+            "ask"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "NetworkAccess": {
       "enum": [
