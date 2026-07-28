@@ -1,0 +1,29 @@
+name: ThreadBox browser runtime
+
+on:
+  pull_request:
+    paths:
+      - "threadbox/**"
+      - ".github/workflows/threadbox-browser-runtime.yml"
+  push:
+    paths:
+      - "threadbox/**"
+      - ".github/workflows/threadbox-browser-runtime.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: threadbox
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: threadbox/guest/package-lock.json
+      - name: Install the pinned AssemblyScript compiler
+        run: npm ci --prefix guest
+      - name: Check, compile, package, and test
+        run: npm test

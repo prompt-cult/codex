@@ -32,6 +32,7 @@ result
 # cli tools
 CLAUDE.md
 .claude/
+.verdent/
 AGENTS.override.md
 
 # caches
@@ -43,6 +44,7 @@ AGENTS.override.md
 .jest/
 *.tsbuildinfo
 .tmp/
+/threadbox/rust/
 
 # local git worktrees checked out inside the repo root
 /main/

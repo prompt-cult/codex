@@ -18,4 +18,5 @@ done
 
 echo "dummy-form server failed to start; see $DIR/.server.log" >&2
 kill "$(cat "$DIR/.server.pid")" 2>/dev/null || true
+rm -f "$DIR/.server.pid"
 exit 1

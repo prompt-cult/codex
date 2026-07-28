@@ -1,0 +1,15 @@
+{
+  "name": "threadbox-browser-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "npm --prefix guest run check",
+    "build:wasm": "npm --prefix guest run build",
+    "package:extension": "node tools/package-extension.mjs",
+    "build": "npm run build:wasm && npm run package:extension",
+    "test:guest": "npm --prefix guest test",
+    "test:extension": "node --test extension/tests/*.test.mjs",
+    "test": "npm run check && npm run test:guest && npm run build && npm run test:extension"
+  }
+}

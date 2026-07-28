@@ -1,42 +1,33 @@
-/// Pure coordinate algebra for the Holo vision round-trip, compiled to
-/// WebAssembly. No I/O lives here — no `fetch`, no Canvas, no DOM. The
-/// browser host (`harness/dummy-form/holo.js`) owns capture, scaling,
-/// and the network call; this module owns the deterministic math that
-/// turns Holo's normalized `[0,1000]` coordinates back into the page's
-/// original pixel coordinates, inverting whatever scale-and-pad the
-/// host applied before sending the image.
-///
-/// The key property, established by spike07/09 of the stenography repo
-/// and re-proven live against `holo3-1-35b-a3b`: Holo returns
-/// coordinates normalized to the image it was *sent*, not to any
-/// canonical resolution. So scaling the image before sending is safe
-/// as long as the inverse map undoes exactly the scale and the pad.
-/// See `harness/dummy-form/README.md` for the full proof transcript.
+/// Pure coordinate algebra compiled to WebAssembly. No I/O lives here:
+/// no `fetch`, Canvas, or DOM. A browser tool may own screenshot capture
+/// and scaling; this module owns the deterministic inverse mapping from
+/// normalized `[0,1000]` coordinates into the original pixel frame.
 ///
 /// The exported API takes only plain integers (no classes cross the
 /// WASM boundary — AssemblyScript classes are not exported as
 /// constructors under `--exportRuntime`). Results that are pairs are
 /// packed into one i64: high 32 bits = x, low 32 bits = y.
 
-/// Convert Holo's normalized `[0,1000]` coordinate into a pixel
-/// coordinate on the *sent* (padded, scaled) canvas. This is the first
-/// half of the round-trip and the only step spike07/09 needed, because
-/// they sent the raw image with no pad. Round-half-up so 0 maps to 0
-/// and 1000 maps to exactly `dimension`.
+/// Convert a normalized `[0,1000]` coordinate into a pixel
+/// coordinate on the *sent* (padded, scaled) canvas. Pixel coordinates
+/// are indices, so the inclusive normalized endpoint 1000 maps to the
+/// final index `dimension - 1`. Returns -1 for an invalid normalized
+/// coordinate or a non-positive dimension.
 export function normToSentPixel(norm: i32, dimension: i32): i32 {
-  return (norm * dimension + 500) / 1000;
+  if (norm < 0 || norm > 1000 || dimension <= 0) return -1;
+  return (norm * (dimension - 1) + 500) / 1000;
 }
 
-/// The full inverse map: take Holo's normalized `{x,y}` plus the
+/// The full inverse map: take normalized `{x,y}` plus the
 /// description of how the host scaled+padded the original capture
 /// before sending, and return the corresponding pixel in the original
 /// page capture's coordinate frame. Returns -1 (as an i64) if the
 /// normalized coordinate lands in the pad.
 ///
 /// Parameters:
-///   normX, normY       — Holo's [0,1000] coordinates
-///   canvasWidth        — full canvas width sent to Holo, including pad
-///   canvasHeight       — full canvas height sent to Holo, including pad
+///   normX, normY       — normalized [0,1000] coordinates
+///   canvasWidth        — full sent canvas width, including pad
+///   canvasHeight       — full sent canvas height, including pad
 ///   contentWidth       — scaled screenshot width inside the canvas
 ///   contentHeight      — scaled screenshot height inside the canvas
 ///   offsetX, offsetY   — content offset inside the canvas (the pad)
@@ -53,8 +44,19 @@ export function normToOriginalPixel(
   origWidth: i32,
   origHeight: i32,
 ): i64 {
+  if (
+    canvasWidth <= 0 ||
+    canvasHeight <= 0 ||
+    contentWidth <= 0 ||
+    contentHeight <= 0 ||
+    origWidth <= 0 ||
+    origHeight <= 0
+  ) {
+    return -1;
+  }
   const sentX = normToSentPixel(normX, canvasWidth);
   const sentY = normToSentPixel(normY, canvasHeight);
+  if (sentX < 0 || sentY < 0) return -1;
 
   const inContentX = sentX - offsetX;
   const inContentY = sentY - offsetY;
@@ -75,6 +77,9 @@ export function normToOriginalPixel(
 /// targetHeight` canvas, preserving aspect ratio. Returns one i64:
 /// high32 = contentWidth, low32 = contentHeight.
 export function planScale(origWidth: i32, origHeight: i32, targetWidth: i32, targetHeight: i32): i64 {
+  if (origWidth <= 0 || origHeight <= 0 || targetWidth <= 0 || targetHeight <= 0) {
+    return -1;
+  }
   let contentWidth = targetWidth;
   let contentHeight = (origHeight * targetWidth + origWidth / 2) / origWidth;
   if (contentHeight > targetHeight) {

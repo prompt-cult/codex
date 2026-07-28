@@ -1,5 +1,5 @@
-/// Unit tests for the Holo coordinate algebra in `assembly/holo.ts`.
-/// Pure math, no I/O — these compile a tiny entry re-exporting holo.ts
+/// Unit tests for the coordinate algebra in `assembly/coordinates.ts`.
+/// Pure math, no I/O — these compile a tiny entry re-exporting coordinates.ts
 /// to WASM and exercise the packed-i64 return shape end to end.
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
@@ -12,44 +12,49 @@ import { randomUUID } from 'node:crypto';
 const GUEST_DIR = process.cwd();
 const ASC = join(GUEST_DIR, 'node_modules/.bin/asc');
 
-function buildHolo() {
-  const dir = join(tmpdir(), `holo-guest-${randomUUID()}`);
+function buildCoordinates() {
+  const dir = join(tmpdir(), `coordinates-guest-${randomUUID()}`);
   mkdirSync(join(dir, 'assembly'), { recursive: true });
-  copyFileSync(join(GUEST_DIR, 'assembly/holo.ts'), join(dir, 'assembly/holo.ts'));
+  copyFileSync(
+    join(GUEST_DIR, 'assembly/coordinates.ts'),
+    join(dir, 'assembly/coordinates.ts'),
+  );
   const entry = join(dir, 'assembly', 'entry.ts');
-  writeFileSync(entry, `export * from "./holo";\n`);
-  const out = join(dir, 'holo.wasm');
+  writeFileSync(entry, `export * from "./coordinates";\n`);
+  const out = join(dir, 'coordinates.wasm');
   execFileSync(ASC, [entry, '-o', out, '--exportRuntime'], { cwd: dir });
   return readFileSync(out);
 }
 
-test('normToSentPixel maps 0 and 1000 to the endpoints', async () => {
-  const wasm = buildHolo();
+test('normToSentPixel maps normalized endpoints to valid pixel indices', async () => {
+  const wasm = buildCoordinates();
   const { instance } = await WebAssembly.instantiate(wasm, {
     env: { abort: () => { throw new Error('abort'); } },
   });
   const f = instance.exports.normToSentPixel;
   assert.strictEqual(f(0, 428), 0);
-  assert.strictEqual(f(1000, 428), 428);
+  assert.strictEqual(f(1000, 428), 427);
   assert.strictEqual(f(500, 428), 214);
+  assert.strictEqual(f(-1, 428), -1);
+  assert.strictEqual(f(1001, 428), -1);
+  assert.strictEqual(f(500, 0), -1);
 });
 
 test('normToOriginalPixel inverts a no-scale, no-pad send', async () => {
-  const wasm = buildHolo();
+  const wasm = buildCoordinates();
   const { instance } = await WebAssembly.instantiate(wasm, {
     env: { abort: () => { throw new Error('abort'); } },
   });
   const e = instance.exports;
-  // Original 428x506, sent as 428x506 (no scale, no pad). Holo's
-  // normalized (100,126) must map back to ~(43,64) — the pixel the
-  // live HAI call returned for the search box.
+  // Original 428x506, sent as 428x506 (no scale, no pad). A normalized
+  // (100,126) must map back to approximately (43,64).
   const packed = e.normToOriginalPixel(100, 126, 428, 506, 428, 506, 0, 0, 428, 506);
   assert.strictEqual(e.unpackX(packed), 43);
   assert.strictEqual(e.unpackY(packed), 64);
 });
 
 test('normToOriginalPixel inverts a scale to 1280 wide with right/bottom pad', async () => {
-  const wasm = buildHolo();
+  const wasm = buildCoordinates();
   const { instance } = await WebAssembly.instantiate(wasm, {
     env: { abort: () => { throw new Error('abort'); } },
   });
@@ -77,7 +82,7 @@ test('normToOriginalPixel inverts a scale to 1280 wide with right/bottom pad', a
 });
 
 test('normToOriginalPixel returns -1 for a coordinate in the pad', async () => {
-  const wasm = buildHolo();
+  const wasm = buildCoordinates();
   const { instance } = await WebAssembly.instantiate(wasm, {
     env: { abort: () => { throw new Error('abort'); } },
   });
@@ -87,7 +92,7 @@ test('normToOriginalPixel returns -1 for a coordinate in the pad', async () => {
 });
 
 test('planScale preserves aspect ratio', async () => {
-  const wasm = buildHolo();
+  const wasm = buildCoordinates();
   const { instance } = await WebAssembly.instantiate(wasm, {
     env: { abort: () => { throw new Error('abort'); } },
   });
@@ -97,4 +102,17 @@ test('planScale preserves aspect ratio', async () => {
   const ch = e.unpackY(plan);
   // 428/506 == cw/ch within integer-rounding noise (±1px).
   assert.ok(Math.abs(cw * 506 - ch * 428) <= 506, `aspect not preserved: ${cw}x${ch}`);
+});
+
+test('invalid dimensions return the sentinel instead of trapping', async () => {
+  const wasm = buildCoordinates();
+  const { instance } = await WebAssembly.instantiate(wasm, {
+    env: { abort: () => { throw new Error('abort'); } },
+  });
+  const e = instance.exports;
+  assert.strictEqual(e.planScale(0, 506, 1280, 1600), -1n);
+  assert.strictEqual(
+    e.normToOriginalPixel(500, 500, 1280, 1600, 0, 1514, 0, 0, 428, 506),
+    -1n,
+  );
 });
