@@ -11,7 +11,7 @@ There is no `xmake` here. These are the only gates:
 | Scope | Command | Run from |
 |---|---|---|
 | Guest sources type-check | `npx asc assembly/ir.ts --noEmit` (and once per source) | `threadbox/guest` |
-| Guest golden tests | `node --test tests/` | `threadbox/guest` |
+| Guest golden tests | `npm test` (i.e. `node --test tests/**/*.test.js`) | `threadbox/guest` |
 | Rust crates | `cargo test` | `threadbox/rust` |
 | Runner end to end | `cargo run --bin tb-run -- ../guest/examples/grants-entry.ts` | `threadbox/rust` |
 | Harness | `npm test` | `threadbox/harness` |

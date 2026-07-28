@@ -133,6 +133,20 @@ fn run_wasm(wasm_bytes: &[u8]) -> Result<String, String> {
         .define("threadbox.ir.v1", "emit", emit)
         .map_err(|e| format!("cannot register host import \"threadbox.ir.v1::emit\": {e}"))?;
 
+    // AssemblyScript's `assert()` (used by `emitGraph()`'s single-Publish
+    // check) compiles to a call to `env::abort` on failure. The guest
+    // never calls it on a well-formed graph, but the import must still
+    // be linkable or instantiation fails before `main` ever runs.
+    let abort = wasmi::Func::wrap(
+        &mut store,
+        |_caller: wasmi::Caller<'_, Vec<u8>>, _msg: i32, _file: i32, line: i32, column: i32| -> () {
+            panic!("guest module called env::abort at line {line}, column {column} (an internal assertion in ir.ts/emit.ts failed)");
+        },
+    );
+    linker
+        .define("env", "abort", abort)
+        .map_err(|e| format!("cannot register host import \"env::abort\": {e}"))?;
+
     let instance = linker
         .instantiate(&mut store, &module)
         .map_err(|e| format!("cannot instantiate wasm module: {e}"))?
