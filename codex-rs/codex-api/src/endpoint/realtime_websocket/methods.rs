@@ -23,7 +23,7 @@ use futures::SinkExt;
 use futures::StreamExt;
 use http::HeaderMap;
 use http::HeaderValue;
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -643,7 +643,7 @@ fn websocket_config() -> WebSocketConfig {
 
 fn websocket_url_from_api_url(
     api_url: &str,
-    query_params: Option<&BTreeMap<String, String>>,
+    query_params: Option<&HashMap<String, String>>,
     model: Option<&str>,
     event_parser: RealtimeEventParser,
     _session_mode: RealtimeSessionMode,
@@ -695,7 +695,7 @@ fn websocket_url_from_api_url(
 
 fn websocket_url_from_api_url_for_call(
     api_url: &str,
-    query_params: Option<&BTreeMap<String, String>>,
+    query_params: Option<&HashMap<String, String>>,
     event_parser: RealtimeEventParser,
     session_mode: RealtimeSessionMode,
     call_id: &str,
@@ -753,7 +753,6 @@ mod tests {
     use pretty_assertions::assert_eq;
     use serde_json::Value;
     use serde_json::json;
-    use std::collections::BTreeMap;
     use std::collections::HashMap;
     use std::time::Duration;
     use tokio::net::TcpListener;
