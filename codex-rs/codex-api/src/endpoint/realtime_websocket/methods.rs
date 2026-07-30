@@ -753,8 +753,8 @@ mod tests {
     use pretty_assertions::assert_eq;
     use serde_json::Value;
     use serde_json::json;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+    use std::collections::BTreeMap;
+    use std::collections::HashMap;
     use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio_tungstenite::accept_async;
