@@ -4245,6 +4245,11 @@ impl ChatWidget {
     /// [`Op::GetGhostSnapshotShas`].  Pick the most-recent SHA and spawn an
     /// async task that runs `git diff --color <sha>`, emitting the result as
     /// [`AppEvent::UndoDiffResult`] for the overlay to render.
+    // TODO(undo-diff): only the #[cfg(test)] EventMsg dispatcher calls this;
+    // the production app-server notification path has no GhostSnapshotShas
+    // bridge yet. Remove this allow once the bridge lands; see
+    // README.undo-diff.md.
+    #[allow(dead_code)]
     fn on_ghost_snapshot_shas(&mut self, shas: Vec<String>) {
         let tx = self.app_event_tx.clone();
         if let Some(sha) = shas.into_iter().next_back() {

@@ -14,7 +14,7 @@ fn main() {
         use std::time::UNIX_EPOCH;
         let secs = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
         // Convert Unix timestamp → UTC calendar fields (no external deps).
         let s = secs % 60;

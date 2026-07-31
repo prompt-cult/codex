@@ -183,9 +183,17 @@ pub(crate) enum AppEvent {
     /// The undo stack SHAs arrived from core; now compute the diff.
     /// Carries the most-recent ghost-snapshot SHA (or an explanatory message
     /// when the undo feature is off / stack is empty).
+    // TODO(undo-diff): never constructed — the flow delivers SHAs straight to
+    // ChatWidget::on_ghost_snapshot_shas instead. Kept pending the app-server
+    // notification bridge; see README.undo-diff.md.
+    #[allow(dead_code)]
     UndoDiffShaReady(Result<String, String>),
 
     /// Result of computing a `/undo-diff` command.
+    // TODO(undo-diff): constructed only from code reachable via the
+    // #[cfg(test)] EventMsg dispatcher until the app-server notification
+    // bridge lands; see README.undo-diff.md.
+    #[allow(dead_code)]
     UndoDiffResult(String),
 
     /// Open the app link view in the bottom pane.

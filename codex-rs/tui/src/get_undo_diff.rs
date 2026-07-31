@@ -16,6 +16,11 @@ use tokio::process::Command;
 /// Returns `(true, diff_text)` when inside a git repo, or `(false, "")` when
 /// not.  The diff text uses ANSI colour codes suitable for display in the
 /// pager overlay.
+// TODO(undo-diff): reachable only via `ChatWidget::on_ghost_snapshot_shas`,
+// which the production app-server path never delivers (no ServerNotification
+// bridge for `EventMsg::GhostSnapshotShas`). Remove this allow once the
+// notification bridge lands; see README.undo-diff.md.
+#[allow(dead_code)]
 pub(crate) async fn get_undo_diff(sha: &str) -> io::Result<(bool, String)> {
     // Confirm we are inside a git repo first.
     let inside = Command::new("git")
