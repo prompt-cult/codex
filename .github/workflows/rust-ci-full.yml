@@ -6,6 +6,12 @@ on:
       - "**full-ci**"
   workflow_dispatch:
 
+env:
+  # Use the git CLI instead of Cargo's libgit2 path for git dependencies.
+  # macOS runners intermittently fail to fetch nested submodules through
+  # SecureTransport/libgit2 (e.g. libwebrtc's libyuv submodule).
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
 # CI builds in debug (dev) for faster signal.
 
 jobs:
