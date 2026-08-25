@@ -21,6 +21,7 @@ use codex_exec::Cli as ExecCli;
 use codex_exec::Command as ExecCommand;
 use codex_exec::ReviewArgs;
 use codex_execpolicy::ExecPolicyCheckCommand;
+use codex_mistral_proxy::Args as MistralProxyArgs;
 use codex_responses_api_proxy::Args as ResponsesApiProxyArgs;
 use codex_state::StateRuntime;
 use codex_state::state_db_path;
@@ -161,6 +162,12 @@ enum Subcommand {
     /// Internal: run the Zen translating proxy (GPT passthrough + Claude ↔ Anthropic translation).
     #[clap(hide = true, name = "zen-proxy")]
     ZenProxy(ZenProxyArgs),
+
+    /// Internal: run the Mistral translating proxy (Responses API ↔ Mistral Chat Completions).
+    /// Pipe the Mistral API key via stdin, e.g.:
+    /// `printenv MISTRAL_API_KEY | codex mistral-proxy --port 8901`
+    #[clap(hide = true, name = "mistral-proxy")]
+    MistralProxy(MistralProxyArgs),
 
     /// Internal: send one raw Responses API payload through Codex auth.
     #[clap(hide = true)]
@@ -644,10 +651,39 @@ fn stage_str(stage: Stage) -> &'static str {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Load `.env` (e.g. MISTRAL_API_KEY) before any configuration reads the
+    // environment. The config-location variables are captured first and
+    // restored afterwards so a `.env` file in an untrusted directory (e.g. a
+    // cloned repo) cannot silently redirect config, auth tokens, and history
+    // to an attacker-chosen directory — only the real process environment may
+    // set CODEX_CONFIG_DIR / CODEX_HOME.
+    let pre_dotenv_config_dir = std::env::var_os("CODEX_CONFIG_DIR");
+    let pre_dotenv_codex_home = std::env::var_os("CODEX_HOME");
+    dotenvy::dotenv().ok();
+    // SAFETY: called at the very start of main() before any threads are
+    // spawned, so no other thread can be concurrently reading the environment.
+    unsafe {
+        restore_env_var("CODEX_CONFIG_DIR", pre_dotenv_config_dir);
+        restore_env_var("CODEX_HOME", pre_dotenv_codex_home);
+    }
     arg0_dispatch_or_else(|arg0_paths: Arg0DispatchPaths| async move {
         cli_main(arg0_paths).await?;
         Ok(())
     })
+}
+
+/// Restores an environment variable to its pre-dotenv value, removing it if
+/// it was not set in the real process environment. Prevents `.env` files from
+/// overriding security-sensitive variables.
+unsafe fn restore_env_var(key: &str, value: Option<std::ffi::OsString>) {
+    // SAFETY: upheld by the caller — only invoked from main() before any
+    // threads exist.
+    unsafe {
+        match value {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
+    }
 }
 
 async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
@@ -1037,6 +1073,14 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 "zen-proxy",
             )?;
             tokio::task::spawn_blocking(move || codex_zen_proxy::run_main(args)).await??;
+        }
+        Some(Subcommand::MistralProxy(args)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "mistral-proxy",
+            )?;
+            tokio::task::spawn_blocking(move || codex_mistral_proxy::run_main(args)).await??;
         }
         Some(Subcommand::Responses(ResponsesCommand {})) => {
             reject_remote_mode_for_subcommand(

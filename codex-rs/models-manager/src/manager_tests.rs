@@ -706,7 +706,9 @@ async fn refresh_available_models_skips_network_without_chatgpt_auth() {
         /*enable_codex_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
     ));
-    let provider = provider_for(server.uri());
+    // Use a non-local base URL so the provider is NOT classified as a local
+    // proxy (which would bypass the auth gate and attempt a remote fetch).
+    let provider = provider_for("http://example.test".to_string());
     let manager = ModelsManager::with_provider_for_tests(
         codex_home.path().to_path_buf(),
         auth_manager,

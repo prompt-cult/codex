@@ -32,8 +32,12 @@ result
 # cli tools
 CLAUDE.md
 .claude/
+.cursor/
 .verdent/
 AGENTS.override.md
+
+# proxy test harness artifacts (frozen binaries, run dirs)
+.proxy-test-bins/
 
 # caches
 .cache/

@@ -154,6 +154,32 @@ impl ModelProviderInfo {
         }
     }
 
+    /// Returns true when this provider points at a local translating proxy
+    /// (e.g. `codex-mistral-proxy` or `codex-zen-proxy`) running on loopback.
+    ///
+    /// When true, the models-manager attempts to discover the available model
+    /// list from the proxy at startup (e.g. `GET {base_url}/models`), with a
+    /// silent fallback to the bundled catalog on failure. This lets a proxy
+    /// expose dynamically whatever models its upstream currently offers.
+    ///
+    /// The host is parsed with `url::Url` and compared exactly against the
+    /// loopback addresses (`localhost`, `127.0.0.1`, `::1`) to avoid
+    /// prefix-matching attacks like `http://localhost.attacker.com`. The
+    /// `url` crate returns IPv6 hosts bracketed (e.g. `[::1]`), so brackets
+    /// are stripped before comparison.
+    pub fn is_local_proxy(&self) -> bool {
+        self.base_url
+            .as_ref()
+            .and_then(|u| url::Url::parse(u).ok())
+            .is_some_and(|u| {
+                matches!(
+                    u.host_str()
+                        .map(|h| h.trim_start_matches('[').trim_end_matches(']')),
+                    Some("localhost" | "127.0.0.1" | "::1")
+                )
+            })
+    }
+
     fn build_header_map(&self) -> CodexResult<HeaderMap> {
         let capacity = self.http_headers.as_ref().map_or(0, HashMap::len)
             + self.env_http_headers.as_ref().map_or(0, HashMap::len);

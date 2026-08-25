@@ -312,7 +312,12 @@ impl ModelsManager {
     #[instrument(level = "info", skip(self, config), fields(model = model))]
     pub async fn get_model_info(&self, model: &str, config: &ModelsManagerConfig) -> ModelInfo {
         let remote_models = self.get_remote_models().await;
-        Self::construct_model_info_from_candidates(model, &remote_models, config)
+        Self::construct_model_info_from_candidates(
+            model,
+            &remote_models,
+            config,
+            self.provider.is_local_proxy(),
+        )
     }
 
     fn find_model_by_longest_prefix(model: &str, candidates: &[ModelInfo]) -> Option<ModelInfo> {
@@ -355,6 +360,7 @@ impl ModelsManager {
         model: &str,
         candidates: &[ModelInfo],
         config: &ModelsManagerConfig,
+        is_local_proxy: bool,
     ) -> ModelInfo {
         // First use the normal longest-prefix match. If that misses, allow a narrowly scoped
         // retry for namespaced slugs like `custom/gpt-5.3-codex`.
@@ -367,7 +373,15 @@ impl ModelsManager {
                 ..remote
             }
         } else {
-            model_info::model_info_from_slug(model)
+            let fallback = model_info::model_info_from_slug(model);
+            // Only apply proxy-discovered model defaults when the provider is
+            // known to be a local proxy; other providers keep the plain
+            // provider-agnostic fallback so their limits are not misreported.
+            if is_local_proxy {
+                model_info::with_local_proxy_defaults(fallback, model)
+            } else {
+                fallback
+            }
         };
         model_info::with_config_overrides(model_info, config)
     }
@@ -397,6 +411,7 @@ impl ModelsManager {
 
         if self.auth_manager.auth_mode() != Some(AuthMode::Chatgpt)
             && !self.provider.has_command_auth()
+            && !self.provider.is_local_proxy()
         {
             if matches!(
                 refresh_strategy,
@@ -577,7 +592,9 @@ impl ModelsManager {
         } else {
             &[]
         };
-        Self::construct_model_info_from_candidates(model, candidates, config)
+        Self::construct_model_info_from_candidates(
+            model, candidates, config, /*is_local_proxy*/ false,
+        )
     }
 }
 

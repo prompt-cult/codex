@@ -177,3 +177,76 @@ refresh_interval_ms = 0
     assert_eq!(auth.refresh_interval_ms, 0);
     assert_eq!(auth.refresh_interval(), None);
 }
+
+#[test]
+fn test_is_local_proxy_detects_localhost_base_urls() {
+    let localhost_provider = ModelProviderInfo {
+        name: "MistralProxy".into(),
+        base_url: Some("http://127.0.0.1:8901".into()),
+        env_key: None,
+        env_key_instructions: None,
+        experimental_bearer_token: None,
+        auth: None,
+        wire_api: WireApi::Responses,
+        query_params: None,
+        http_headers: None,
+        env_http_headers: None,
+        request_max_retries: None,
+        stream_max_retries: None,
+        stream_idle_timeout_ms: None,
+        websocket_connect_timeout_ms: None,
+        requires_openai_auth: false,
+        supports_websockets: false,
+    };
+    assert!(localhost_provider.is_local_proxy());
+
+    let localhost_named_provider = ModelProviderInfo {
+        base_url: Some("http://localhost:8901/v1".into()),
+        ..localhost_provider.clone()
+    };
+    assert!(localhost_named_provider.is_local_proxy());
+
+    let remote_provider = ModelProviderInfo {
+        base_url: Some("https://api.mistral.ai/v1".into()),
+        ..localhost_provider.clone()
+    };
+    assert!(!remote_provider.is_local_proxy());
+
+    // Prefix-matching attack: `http://localhost.attacker.com` must NOT be
+    // classified as a local proxy.
+    let spoofed_provider = ModelProviderInfo {
+        base_url: Some("http://localhost.attacker.com".into()),
+        ..localhost_provider.clone()
+    };
+    assert!(!spoofed_provider.is_local_proxy());
+
+    // IPv6 loopback is also a local proxy.
+    let ipv6_provider = ModelProviderInfo {
+        base_url: Some("http://[::1]:8901".into()),
+        ..localhost_provider.clone()
+    };
+    assert!(ipv6_provider.is_local_proxy());
+
+    let no_base_url_provider = ModelProviderInfo {
+        base_url: None,
+        ..ModelProviderInfo {
+            name: "Default".into(),
+            base_url: None,
+            env_key: None,
+            env_key_instructions: None,
+            experimental_bearer_token: None,
+            auth: None,
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_openai_auth: false,
+            supports_websockets: false,
+        }
+    };
+    assert!(!no_base_url_provider.is_local_proxy());
+}

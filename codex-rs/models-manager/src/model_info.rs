@@ -57,6 +57,11 @@ pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig)
 }
 
 /// Build a minimal fallback model descriptor for missing/unknown slugs.
+///
+/// This function is provider-agnostic: every unknown slug receives the same
+/// default metadata. Provider-specific adjustments (e.g. Mistral-hosted
+/// models discovered via a local proxy) are applied at the call site via
+/// [`with_local_proxy_defaults`], where the provider is known.
 pub fn model_info_from_slug(slug: &str) -> ModelInfo {
     warn!("Unknown model {slug} is used. This will use fallback model metadata.");
     ModelInfo {
@@ -90,6 +95,33 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: true, // this is the fallback model metadata
         supports_search_tool: false,
+    }
+}
+
+/// Adjust fallback metadata for models discovered dynamically from a local
+/// translating proxy (e.g. `codex-mistral-proxy`). Call this only when the
+/// provider is known to be a local proxy; for all other providers the plain
+/// [`model_info_from_slug`] fallback applies.
+///
+/// Mistral-hosted models (`zai-glm-5-2`, `mistral-*`, `codestral-*`,
+/// `devstral*`) share a 128k context window. Other slugs (e.g. GPT or Claude
+/// models served by a different proxy) are left untouched so their limits are
+/// not misreported. The user can still override the context window via
+/// `model_context_window` in config.
+pub fn with_local_proxy_defaults(fallback: ModelInfo, slug: &str) -> ModelInfo {
+    let is_mistral_hosted = slug.starts_with("mistral-")
+        || slug.starts_with("zai-")
+        || slug.starts_with("codestral-")
+        || slug == "devstral"
+        || slug.starts_with("devstral-");
+    if is_mistral_hosted {
+        ModelInfo {
+            context_window: Some(128_000),
+            truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 100_000),
+            ..fallback
+        }
+    } else {
+        fallback
     }
 }
 
