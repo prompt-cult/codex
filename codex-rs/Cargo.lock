@@ -2423,6 +2423,7 @@ dependencies = [
  "anyhow",
  "clap",
  "codex-process-hardening",
+ "codex-protocol",
  "ctor 0.6.3",
  "libc",
  "pretty_assertions",

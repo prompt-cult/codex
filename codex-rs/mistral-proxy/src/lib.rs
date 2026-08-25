@@ -45,11 +45,38 @@ use tiny_http::Response;
 use tiny_http::Server;
 use tiny_http::StatusCode;
 
+mod models_translate;
 mod read_api_key;
 mod translate_request;
 mod translate_sse;
 
-use read_api_key::read_auth_header_from_stdin;
+use read_api_key::read_auth_header;
+
+/// Classification of an incoming request path, ignoring any query string.
+///
+/// Codex always appends `?client_version=X` to `/v1/models`, so route matching
+/// must compare the path only. Matching the raw URL (path + query) is the bug
+/// that made model discovery 403.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RouteKind {
+    Models,
+    Responses,
+    Shutdown,
+    Health,
+    Forbidden,
+}
+
+/// Map a raw request URL (path plus optional query) to a [`RouteKind`].
+fn classify_route(raw_url: &str) -> RouteKind {
+    let path = raw_url.split('?').next().unwrap_or(raw_url);
+    match path {
+        "/v1/models" | "/models" => RouteKind::Models,
+        "/v1/responses" => RouteKind::Responses,
+        "/shutdown" => RouteKind::Shutdown,
+        "/health" => RouteKind::Health,
+        _ => RouteKind::Forbidden,
+    }
+}
 
 /// CLI arguments for the Mistral translating proxy.
 #[derive(Debug, Clone, Parser)]
@@ -91,7 +118,7 @@ struct ProxyConfig {
 
 /// Entry point.
 pub fn run_main(args: Args) -> Result<()> {
-    let auth_header = read_auth_header_from_stdin()?;
+    let auth_header = read_auth_header()?;
 
     let upstream_base = args.upstream_base.trim_end_matches('/').to_string();
     let parsed = Url::parse(&upstream_base).context("parsing --upstream-base")?;
@@ -132,14 +159,14 @@ pub fn run_main(args: Args) -> Result<()> {
         let config = config.clone();
         std::thread::spawn(move || {
             let method = request.method().clone();
-            let url = request.url().to_string();
+            let route = classify_route(request.url());
 
-            if http_shutdown && method == Method::Get && url == "/shutdown" {
+            if http_shutdown && method == Method::Get && route == RouteKind::Shutdown {
                 let _ = request.respond(Response::new_empty(StatusCode(200)));
                 std::process::exit(0);
             }
 
-            if method == Method::Get && url == "/health" {
+            if method == Method::Get && route == RouteKind::Health {
                 let body = serde_json::json!({
                     "status": "ok",
                     "proxy": "codex-mistral-proxy",
@@ -196,33 +223,44 @@ fn handle_request(
     req: Request,
 ) -> Result<()> {
     let method = req.method().clone();
-    let url_path = req.url().to_string();
+    let url = req.url().to_string();
+    let route = classify_route(&url);
 
-    // GET /v1/models — passthrough to Mistral's models endpoint for dynamic
-    // discovery by the main app (Rung 3 of the plan).
-    if method == Method::Get && (url_path == "/v1/models" || url_path == "/models") {
-        return handle_models_passthrough(client, auth_header, config, req);
+    eprintln!("mistral-proxy: {method} {url} -> {route:?}");
+
+    // GET /v1/models — translate Mistral's model list into the codex
+    // `ModelsResponse` shape for dynamic discovery by the main app.
+    if method == Method::Get && route == RouteKind::Models {
+        return handle_models_request(client, auth_header, config, req);
     }
 
     // POST /v1/responses — translate to Mistral chat/completions.
-    if method == Method::Post && url_path == "/v1/responses" {
+    if method == Method::Post && route == RouteKind::Responses {
         return handle_responses_translate(client, auth_header, config, req);
     }
 
+    eprintln!("mistral-proxy: 403 forbidden for {method} {url}");
     if let Err(e) = req.respond(Response::new_empty(StatusCode(403))) {
         eprintln!("mistral-proxy: failed to respond 403: {e}");
     }
     Ok(())
 }
 
-/// Passthrough for GET /v1/models: forward to `{upstream}/models` with auth.
-fn handle_models_passthrough(
+/// GET /v1/models: fetch `{upstream}/models` and translate Mistral's raw list
+/// into the codex `ModelsResponse` shape so `codex-api` can deserialize it.
+///
+/// Only chat-capable models are returned. On any upstream error the original
+/// error response is relayed unchanged (so the app falls back to the bundled
+/// catalog rather than seeing a malformed body).
+fn handle_models_request(
     client: &Client,
     auth_header: &'static str,
     config: &ProxyConfig,
     req: Request,
 ) -> Result<()> {
     let upstream_url = format!("{}/models", config.upstream_base);
+    eprintln!("mistral-proxy: fetching upstream {upstream_url}");
+
     let mut headers = HeaderMap::new();
     let mut auth_value = HeaderValue::from_static(auth_header);
     auth_value.set_sensitive(true);
@@ -235,7 +273,33 @@ fn handle_models_passthrough(
         .send()
         .context("forwarding models request to upstream")?;
 
-    relay_response(req, upstream_resp)
+    eprintln!("mistral-proxy: upstream responded {}", upstream_resp.status());
+
+    // Relay non-200 responses verbatim so the app can log the real cause.
+    if upstream_resp.status().as_u16() != 200 {
+        return relay_response(req, upstream_resp);
+    }
+
+    let raw = upstream_resp
+        .bytes()
+        .context("reading Mistral models response")?;
+    let models_response = models_translate::translate_mistral_models(&raw)
+        .context("translating Mistral /models to ModelsResponse")?;
+    let model_count = models_response.models.len();
+    let data = serde_json::to_vec(&models_response).context("serializing ModelsResponse")?;
+
+    eprintln!("mistral-proxy: translated {model_count} models for client");
+
+    let resp = Response::from_data(data)
+        .with_status_code(StatusCode(200))
+        .with_header(
+            Header::from_bytes(b"content-type", b"application/json")
+                .unwrap_or_else(|_| unreachable!()),
+        );
+    if let Err(e) = req.respond(resp) {
+        eprintln!("mistral-proxy: failed to respond models: {e}");
+    }
+    Ok(())
 }
 
 /// Translate OAI Responses API request to Mistral Chat Completions and back.
@@ -390,4 +454,30 @@ fn relay_response(req: Request, upstream_resp: reqwest::blocking::Response) -> R
         eprintln!("mistral-proxy: failed to relay response: {e}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::RouteKind;
+    use super::classify_route;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn models_route_ignores_query_string() {
+        assert_eq!(
+            classify_route("/v1/models?client_version=0.121.0"),
+            RouteKind::Models
+        );
+        assert_eq!(classify_route("/v1/models"), RouteKind::Models);
+        assert_eq!(classify_route("/models"), RouteKind::Models);
+    }
+
+    #[test]
+    fn other_routes_classify() {
+        assert_eq!(classify_route("/v1/responses"), RouteKind::Responses);
+        assert_eq!(classify_route("/health"), RouteKind::Health);
+        assert_eq!(classify_route("/shutdown"), RouteKind::Shutdown);
+        assert_eq!(classify_route("/nope"), RouteKind::Forbidden);
+        assert_eq!(classify_route("/v1/unknown?x=1"), RouteKind::Forbidden);
+    }
 }

@@ -22,7 +22,6 @@ use codex_exec_server::EnvironmentManager;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
-use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use codex_models_manager::manager::ModelsManager;
 use codex_models_manager::manager::RefreshStrategy;
@@ -228,11 +227,11 @@ impl ThreadManager {
     ) -> Self {
         let codex_home = config.codex_home.clone();
         let restriction_product = session_source.restriction_product();
-        let openai_models_provider = config
-            .model_providers
-            .get(OPENAI_PROVIDER_ID)
-            .cloned()
-            .unwrap_or_else(|| ModelProviderInfo::create_openai_provider(/*base_url*/ None));
+        // Use the provider the config actually resolved (model_provider), not a
+        // hardcoded OpenAI provider. When the active provider is a local
+        // translating proxy (e.g. codex-mistral-proxy on loopback), this is what
+        // makes is_local_proxy() true so model discovery fetches from the proxy.
+        let models_provider = config.model_provider.clone();
         let (thread_created_tx, _) = broadcast::channel(THREAD_CREATED_CHANNEL_CAPACITY);
         let plugins_manager = Arc::new(PluginsManager::new_with_restriction_product(
             codex_home.to_path_buf(),
@@ -254,7 +253,7 @@ impl ThreadManager {
                     auth_manager.clone(),
                     config.model_catalog.clone(),
                     collaboration_modes_config,
-                    openai_models_provider,
+                    models_provider,
                 )),
                 environment_manager,
                 skills_manager,

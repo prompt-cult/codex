@@ -36,6 +36,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::sync::TryLockError;
 use tokio::time::timeout;
+use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::instrument;
@@ -406,17 +407,24 @@ impl ModelsManager {
     async fn refresh_available_models(&self, refresh_strategy: RefreshStrategy) -> CoreResult<()> {
         // don't override the custom model catalog if one was provided by the user
         if matches!(self.catalog_mode, CatalogMode::Custom) {
+            debug!("models refresh: skipping, custom catalog mode");
             return Ok(());
         }
 
-        if self.auth_manager.auth_mode() != Some(AuthMode::Chatgpt)
-            && !self.provider.has_command_auth()
-            && !self.provider.is_local_proxy()
-        {
+        let auth_mode = self.auth_manager.auth_mode();
+        let has_command_auth = self.provider.has_command_auth();
+        let is_local_proxy = self.provider.is_local_proxy();
+        debug!(
+            "models refresh: auth_mode={:?} has_command_auth={} is_local_proxy={} base_url={:?}",
+            auth_mode, has_command_auth, is_local_proxy, self.provider.base_url
+        );
+
+        if auth_mode != Some(AuthMode::Chatgpt) && !has_command_auth && !is_local_proxy {
             if matches!(
                 refresh_strategy,
                 RefreshStrategy::Offline | RefreshStrategy::OnlineIfUncached
             ) {
+                debug!("models refresh: skipping fetch, trying cache only");
                 self.try_load_cache().await;
             }
             return Ok(());
@@ -425,6 +433,7 @@ impl ModelsManager {
         match refresh_strategy {
             RefreshStrategy::Offline => {
                 // Only try to load from cache, never fetch
+                debug!("models refresh: Offline strategy, trying cache only");
                 self.try_load_cache().await;
                 Ok(())
             }
@@ -439,6 +448,7 @@ impl ModelsManager {
             }
             RefreshStrategy::Online => {
                 // Always fetch from network
+                debug!("models refresh: Online strategy, fetching remote models");
                 self.fetch_and_update_models().await
             }
         }
@@ -450,6 +460,7 @@ impl ModelsManager {
         let auth = self.auth_manager.auth().await;
         let auth_mode = auth.as_ref().map(CodexAuth::auth_mode);
         let api_provider = self.provider.to_api_provider(auth_mode)?;
+        info!("models fetch: provider base_url={:?}", api_provider.base_url);
         let api_auth = auth_provider_from_auth(auth.clone(), &self.provider)?;
         let auth_env = collect_auth_env_telemetry(
             &self.provider,
@@ -466,6 +477,7 @@ impl ModelsManager {
             .with_telemetry(Some(request_telemetry));
 
         let client_version = crate::client_version_to_whole();
+        info!("models fetch: requesting /models?client_version={}", client_version);
         let (models, etag) = timeout(
             MODELS_REFRESH_TIMEOUT,
             client.list_models(&client_version, HeaderMap::new()),
@@ -474,6 +486,7 @@ impl ModelsManager {
         .map_err(|_| CodexErr::Timeout)?
         .map_err(map_api_error)?;
 
+        info!("models fetch: received {} models from remote", models.len());
         self.apply_remote_models(models.clone()).await;
         *self.etag.write().await = etag.clone();
         self.cache_manager
@@ -488,7 +501,16 @@ impl ModelsManager {
 
     /// Replace the cached remote models and rebuild the derived presets list.
     async fn apply_remote_models(&self, models: Vec<ModelInfo>) {
-        let mut existing_models = Self::load_remote_models_from_file().unwrap_or_default();
+        // A local translating proxy is the authoritative catalog for its own
+        // models. Seeding from the bundled catalog would leave stock `gpt-*`
+        // entries in the picker even though selecting one would route through
+        // the proxy and fail upstream, so start from an empty base and show
+        // only what the proxy discovered.
+        let mut existing_models = if self.provider.is_local_proxy() {
+            Vec::new()
+        } else {
+            Self::load_remote_models_from_file().unwrap_or_default()
+        };
         for model in models {
             if let Some(existing_index) = existing_models
                 .iter()

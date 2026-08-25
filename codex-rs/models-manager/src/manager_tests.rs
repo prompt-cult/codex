@@ -404,6 +404,48 @@ async fn refresh_available_models_sorts_by_priority() {
 }
 
 #[tokio::test]
+async fn refresh_available_models_local_proxy_hides_bundled_catalog() {
+    // A loopback provider URI classifies as a local proxy, so discovery should
+    // return ONLY the proxy-reported models — no bundled `gpt-*` entries.
+    let server = MockServer::start().await;
+    let remote_models = vec![remote_model("zai-glm-5-2", "GLM 5.2", /*priority*/ 0)];
+    mount_models_once(
+        &server,
+        ModelsResponse {
+            models: remote_models.clone(),
+        },
+    )
+    .await;
+
+    let codex_home = tempdir().expect("temp dir");
+    let auth_manager =
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let provider = provider_for(server.uri());
+    assert!(
+        provider.is_local_proxy(),
+        "loopback mock server should classify as a local proxy"
+    );
+    let manager = ModelsManager::with_provider_for_tests(
+        codex_home.path().to_path_buf(),
+        auth_manager,
+        provider,
+    );
+
+    manager
+        .refresh_available_models(RefreshStrategy::OnlineIfUncached)
+        .await
+        .expect("refresh succeeds");
+
+    let cached_remote = manager.get_remote_models().await;
+    let slugs: Vec<&str> = cached_remote.iter().map(|m| m.slug.as_str()).collect();
+    assert_eq!(slugs, vec!["zai-glm-5-2"]);
+    assert!(
+        !cached_remote.iter().any(|m| m.slug.starts_with("gpt")),
+        "bundled gpt-* models must not leak into a local-proxy catalog: {slugs:?}"
+    );
+}
+
+#[tokio::test]
 async fn refresh_available_models_uses_provider_auth_token() {
     let server = MockServer::start().await;
     let auth_script = ProviderAuthScript::new(&["provider-token"]).unwrap();

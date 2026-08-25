@@ -1,9 +1,8 @@
-//! API key reading from stdin, mirroring `codex-zen-proxy`. The key is read via
-//! a low-level `read(2)` on Unix to avoid stdio's BufReader retaining a copy
-//! in memory, and the leaked `&'static str` is protected with `mlock(2)`.
-//!
-//! The user pipes the Mistral API key (e.g. from `.env`'s `MISTRAL_API_KEY`)
-//! into the proxy on stdin.
+//! API key reading, mirroring `codex-zen-proxy`'s security model. The key is
+//! taken from the `MISTRAL_API_KEY` environment variable when present (loaded
+//! from `.env` by the CLI's dotenvy setup), falling back to stdin via a
+//! low-level `read(2)` on Unix to avoid stdio's BufReader retaining a copy in
+//! memory. The leaked `&'static str` is protected with `mlock(2)`.
 
 use anyhow::Context;
 use anyhow::Result;
@@ -12,6 +11,29 @@ use zeroize::Zeroize;
 
 const BUFFER_SIZE: usize = 1024;
 const AUTH_HEADER_PREFIX: &[u8] = b"Bearer ";
+const MISTRAL_API_KEY_ENV: &str = "MISTRAL_API_KEY";
+
+/// Reads the auth token, preferring the `MISTRAL_API_KEY` environment variable
+/// (populated from `.env` by dotenvy) and falling back to stdin. Returns a
+/// static `Authorization` header value with the token used with `Bearer`, whose
+/// bytes are locked in memory to avoid accidental exposure.
+pub(crate) fn read_auth_header() -> Result<&'static str> {
+    if let Ok(key) = std::env::var(MISTRAL_API_KEY_ENV) {
+        let key = key.trim();
+        if !key.is_empty() {
+            return auth_header_from_key(key);
+        }
+    }
+    read_auth_header_from_stdin()
+}
+
+/// Builds the locked `Bearer` header from a raw key string.
+fn auth_header_from_key(key: &str) -> Result<&'static str> {
+    validate_auth_header_bytes(key.as_bytes())?;
+    let leaked: &'static mut str = format!("Bearer {key}").leak();
+    mlock_str(leaked);
+    Ok(leaked)
+}
 
 /// Reads the auth token from stdin and returns a static `Authorization` header
 /// value with the auth token used with `Bearer`. The header value is returned
@@ -293,6 +315,19 @@ mod tests {
         })
         .unwrap_err();
 
+        let message = format!("{err:#}");
+        assert!(message.contains("API key may only contain ASCII letters, numbers, '-' or '_'"));
+    }
+
+    #[test]
+    fn auth_header_from_key_builds_bearer_header() {
+        let header = auth_header_from_key("abc123-def").unwrap();
+        assert_eq!(header, "Bearer abc123-def");
+    }
+
+    #[test]
+    fn auth_header_from_key_rejects_invalid_characters() {
+        let err = auth_header_from_key("abc!23").unwrap_err();
         let message = format!("{err:#}");
         assert!(message.contains("API key may only contain ASCII letters, numbers, '-' or '_'"));
     }
