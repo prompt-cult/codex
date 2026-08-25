@@ -44,7 +44,23 @@ In the codex-rs folder where the rust code lives:
     `codex-rs/tui/src/bottom_pane/mod.rs`, and similarly central orchestration modules.
   - When extracting code from a large module, move the related tests and module/type docs toward
     the new implementation so the invariants stay close to the code that owns them.
-- When running Rust commands (e.g. `just fix` or `cargo test`) be patient with the command and never try to kill them using the PID. Rust lock can make the execution slow, this is expected.
+- When running Rust commands (e.g. `just fix` or `cargo test`) be patient with the command. Cargo
+  serializes builds with a lock: a second cargo invocation against the same `target/` dir waits
+  silently until the first finishes. That wait is expected, not a hang.
+- Builds: prefer incremental and watch the output directly.
+  - Ballparks measured on an M4 32 GB (Aug 2026, this repo): cold `cargo build --release -p codex-cli`
+    ~15–17 min; warm incremental with no source changes ~1 s; single-crate test build a few minutes.
+    If you need a wall-clock bound, give `cargo build --release -p codex-cli` ~25 min, not 30 s.
+  - Do NOT write polling loops that sleep then `pgrep -f "cargo build"`: the pattern matches the
+    polling shell's own command line, so it never observes completion and wastes minutes. Instead
+    run cargo in the foreground and let the shell tool block until it exits, or background it and
+    grep the log for `^    Finished `release`` / `error` (match cargo's output, not process names).
+  - When in doubt whether a build is progressing, `tail -5` the build log and look for rolling
+    `Compiling <crate>` lines — that is the progress indicator.
+  - If you must free a wedged cargo build, kill it by the exact PID shown by
+    `pgrep -x cargo` (exact process-name match, never `-f` patterns that can match shells/editors).
+  - Never delete or `cargo clean` the `target/` dir unless explicitly asked: it destroys the cache
+    that makes every subsequent build take ~1 s.
 
 Run `just fmt` (in `codex-rs` directory) automatically after you have finished making Rust code changes; do not ask for approval to run it. Additionally, run the tests:
 
