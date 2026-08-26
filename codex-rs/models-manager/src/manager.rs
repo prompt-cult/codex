@@ -215,7 +215,33 @@ impl ModelsManager {
         provider: ModelProviderInfo,
     ) -> Self {
         let auth_manager = required_auth_manager_for_provider(auth_manager, &provider);
-        let cache_path = codex_home.join(MODEL_CACHE_FILE);
+        let cache_path = {
+            use sha2::{Digest, Sha256};
+            let key_input = format!(
+                "{}|{}",
+                if provider.is_local_proxy() { "local_proxy" } else { "openai" },
+                provider.base_url.as_deref().unwrap_or("").trim_end_matches('/').to_lowercase()
+            );
+            let digest = format!("{:x}", Sha256::digest(key_input.as_bytes()));
+            let cache_dir = codex_home.join("cache");
+            if !cache_dir.exists() {
+                let _ = std::fs::create_dir_all(&cache_dir);
+            }
+            let new_path = cache_dir.join(format!("models_{}.json", &digest[..16]));
+            
+            let old_path = codex_home.join(MODEL_CACHE_FILE);
+            if old_path.exists() {
+                if !provider.is_local_proxy() {
+                    let _ = std::fs::rename(&old_path, &new_path).or_else(|_| {
+                        std::fs::copy(&old_path, &new_path).and_then(|_| std::fs::remove_file(&old_path))
+                    });
+                } else {
+                    let _ = std::fs::remove_file(&old_path);
+                }
+            }
+            
+            new_path
+        };
         let cache_manager = ModelsCacheManager::new(cache_path, DEFAULT_MODEL_CACHE_TTL);
         let catalog_mode = if model_catalog.is_some() {
             CatalogMode::Custom
@@ -224,7 +250,13 @@ impl ModelsManager {
         };
         let remote_models = model_catalog
             .map(|catalog| catalog.models)
-            .unwrap_or_else(|| Self::load_remote_models_from_file().unwrap_or_default());
+            .unwrap_or_else(|| {
+                if provider.is_local_proxy() {
+                    Vec::new()
+                } else {
+                    Self::load_remote_models_from_file().unwrap_or_default()
+                }
+            });
         Self {
             remote_models: RwLock::new(remote_models),
             catalog_mode,
@@ -460,7 +492,10 @@ impl ModelsManager {
         let auth = self.auth_manager.auth().await;
         let auth_mode = auth.as_ref().map(CodexAuth::auth_mode);
         let api_provider = self.provider.to_api_provider(auth_mode)?;
-        info!("models fetch: provider base_url={:?}", api_provider.base_url);
+        info!(
+            "models fetch: provider base_url={:?}",
+            api_provider.base_url
+        );
         let api_auth = auth_provider_from_auth(auth.clone(), &self.provider)?;
         let auth_env = collect_auth_env_telemetry(
             &self.provider,
@@ -477,14 +512,34 @@ impl ModelsManager {
             .with_telemetry(Some(request_telemetry));
 
         let client_version = crate::client_version_to_whole();
-        info!("models fetch: requesting /models?client_version={}", client_version);
-        let (models, etag) = timeout(
+        info!(
+            "models fetch: requesting /models?client_version={}",
+            client_version
+        );
+        let (models, etag) = match timeout(
             MODELS_REFRESH_TIMEOUT,
             client.list_models(&client_version, HeaderMap::new()),
         )
         .await
-        .map_err(|_| CodexErr::Timeout)?
-        .map_err(map_api_error)?;
+        {
+            Ok(Ok(res)) => res,
+            Ok(Err(e)) => {
+                let err = map_api_error(e);
+                error!(
+                    base_url = ?self.provider.base_url,
+                    error = ?err,
+                    "models fetch failed for provider"
+                );
+                return Err(err);
+            }
+            Err(_) => {
+                error!(
+                    base_url = ?self.provider.base_url,
+                    "models fetch timed out for provider"
+                );
+                return Err(CodexErr::Timeout);
+            }
+        };
 
         info!("models fetch: received {} models from remote", models.len());
         self.apply_remote_models(models.clone()).await;
