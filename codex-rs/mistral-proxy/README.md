@@ -1,9 +1,13 @@
 # codex-mistral-proxy
 
+Proxy ID: `proxy-mistral-ai`. Implements the
+[Prompt Cult Proxy Protocol](../docs/proxy-protocol.md) — read that first; it
+is the binding contract for this and every future proxy.
+
 A standalone translating proxy that lets codex talk to the Mistral AI API. It
 speaks the OpenAI Responses API on the loopback side (what codex expects) and
-the Mistral Chat Completions API upstream. It mirrors the structure and security
-model of `codex-zen-proxy`: the API key is read from stdin into
+the Mistral Chat Completions API upstream. The API key is read from the
+`MISTRAL_API_KEY` environment variable (falling back to stdin) into
 `mlock(2)`-protected memory and injected into upstream requests; the proxy is
 never auto-spawned by the app — you boot it yourself.
 
@@ -13,10 +17,11 @@ exposes now or in the future works automatically.
 ## Running
 
 ```shell
+# key from the environment (dotenvy in the CLI already loads .env):
+codex mistral-proxy --port 8901
+# or piped explicitly:
 grep '^MISTRAL_API_KEY=' /path/to/.env | cut -d= -f2 \
   | codex mistral-proxy --port 8901
-# or, if the key is already exported in your shell:
-printenv MISTRAL_API_KEY | codex mistral-proxy --port 8901
 ```
 
 ## HTTP contract
@@ -29,9 +34,44 @@ The proxy exposes exactly the surface codex needs:
   (`?client_version=X`), so the route match must ignore the query. The response
   is the codex `ModelsResponse` shape (`{"models":[…]}`), translated from
   Mistral's raw `{"object":"list","data":[…]}`. Only chat-capable models
-  (`capabilities.completion_chat == true`) are returned.
+  (`capabilities.completion_chat == true`) are returned, minus any model whose
+  ID matches an exclude glob (see below).
 - `GET /health` — liveness.
 - `GET /shutdown` — only when `--http-shutdown` is set.
+
+## Proxy config (`proxy-mistral-ai.jsonc`)
+
+The proxy reads `$CODEX_CONFIG_DIR/proxy-mistral-ai.jsonc` (default
+`~/.codex/proxy-mistral-ai.jsonc`). The file is optional; without it the
+defaults below apply. A malformed file is a startup error, never silently
+ignored. Startup always logs whether the file was found.
+
+```jsonc
+{
+  // Upstream endpoint override:
+  // "upstream_base_url": "https://api.mistral.ai/v1",
+
+  // Glob patterns matched against the upstream model ID; matches are dropped
+  // from discovery. "*" matches any run of characters; a pattern with no "*"
+  // is an exact match. These are the defaults — set your own list to override
+  // (an empty list disables filtering):
+  "model_exclude_globs": [
+    "*-ocr-*",      // OCR models are not chat models for our purposes
+    "*-mini-*",     // voxtral-mini etc.
+    "magistral-*",
+    "ministral-*",  // 3B/8B/14B local-class models
+    "voxtral-*",    // audio
+    "glm-5-2"       // exact-match ban of the alias; zai-glm-5-2 still passes
+  ],
+
+  // "normal" (default) or "verbose" — verbose logs one line per proxied
+  // /v1/responses request: request number, requested model, upstream model.
+  "log_level": "normal"
+}
+```
+
+Discovery logs `loaded N models, M after exclusions` on every `/v1/models`
+fetch so filtering is auditable.
 
 ## Model discovery contract
 
@@ -56,5 +96,6 @@ CODEX_CONFIG_DIR=$HOME/.codex-mistral codex
 
 `~/.codex-mistral/config.toml` defines a provider with
 `base_url = "http://127.0.0.1:8901/v1"` and no `model_catalog`. When the proxy
-is reachable, the model picker lists Mistral's live models; when it is not, the
-app falls back silently to the bundled catalog.
+is reachable, the model picker lists Mistral's live models. When the proxy is
+unreachable, the app surfaces a fetch error and shows no remote models — it
+never silently substitutes the bundled GPT catalog for a local-proxy provider.
