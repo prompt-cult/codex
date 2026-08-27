@@ -76,8 +76,9 @@ pub(crate) struct MistralToOaiStream {
     completed: bool,
     /// Buffered translated bytes not yet consumed by `read()`.
     buf: Vec<u8>,
-    /// Upstream response (used as a line source).
-    upstream: reqwest::blocking::Response,
+    /// Upstream SSE byte source (a `reqwest::blocking::Response` in
+    /// production; boxed so tests can feed synthetic streams).
+    upstream: Box<dyn Read + Send>,
     /// Whether the upstream stream is exhausted.
     done: bool,
     /// Residual bytes from the last upstream read (partial SSE line).
@@ -92,7 +93,7 @@ pub(crate) struct MistralToOaiStream {
 impl MistralToOaiStream {
     pub(crate) fn new(
         model: String,
-        upstream: reqwest::blocking::Response,
+        upstream: Box<dyn Read + Send>,
         verbose_req: Option<u64>,
     ) -> Self {
         let resp_id = format!("resp_{}", Uuid::new_v4().simple());
@@ -241,8 +242,12 @@ impl MistralToOaiStream {
             );
         }
 
-        // Handle tool call deltas.
+        // Handle tool call deltas. The assistant message item (index 0) is
+        // opened first even when tool calls precede any text: output indices
+        // must never shift mid-stream, and a tool call announced at index 0
+        // would collide with a later-arriving message item.
         if let Some(tool_calls) = delta["tool_calls"].as_array() {
+            self.ensure_msg_item();
             for tc in tool_calls {
                 let idx = tc["index"].as_u64().unwrap_or(0) as usize;
                 self.handle_tool_call_delta(idx, tc);
@@ -264,9 +269,9 @@ impl MistralToOaiStream {
         self.emit("response.in_progress", skeleton);
     }
 
-    /// Offset for tool-call `output_index` values: when the assistant text
-    /// message occupies index 0, tool calls start at index 1; when there is no
-    /// text message (only tool calls), they start at index 0.
+    /// Offset for tool-call `output_index` values: the assistant message item
+    /// always occupies index 0 (it is opened before any tool call is
+    /// announced), so tool calls always start at index 1.
     fn msg_offset(&self) -> usize {
         if self.msg_id.is_some() { 1 } else { 0 }
     }
@@ -312,8 +317,6 @@ impl MistralToOaiStream {
         let incoming_args = tc["function"]["arguments"].as_str().map(str::to_string);
         let has_function_name_field = tc.get("function").is_some_and(|f| f.get("name").is_some());
 
-        // Compute the output index offset dynamically: when there is no text
-        // message item, tool calls start at index 0 instead of index 1.
         let output_index = idx + self.msg_offset();
 
         // Ensure an entry exists; capture the current state snapshot.
@@ -594,5 +597,174 @@ impl MistralToOaiStream {
             map.insert("sequence_number".to_string(), json!(seq));
         }
         self.emit(event_type, data);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    fn stream(model: &str) -> MistralToOaiStream {
+        MistralToOaiStream::new(
+            model.to_string(),
+            Box::new(&b""[..]),
+            /*verbose_req*/ None,
+        )
+    }
+
+    /// Drain the translator's output buffer and parse the emitted SSE events
+    /// into (event_type, data) pairs.
+    fn drain_events(t: &mut MistralToOaiStream) -> Vec<(String, Value)> {
+        let raw = String::from_utf8(std::mem::take(&mut t.buf)).expect("utf8");
+        let mut events = Vec::new();
+        for block in raw.split("\n\n") {
+            let mut event_type = None;
+            let mut data = None;
+            for line in block.lines() {
+                if let Some(et) = line.strip_prefix("event: ") {
+                    event_type = Some(et.to_string());
+                } else if let Some(d) = line.strip_prefix("data: ") {
+                    data = serde_json::from_str(d).ok();
+                }
+            }
+            if let (Some(et), Some(d)) = (event_type, data) {
+                events.push((et, d));
+            }
+        }
+        events
+    }
+
+    fn data_line(payload: &str) -> String {
+        format!("data: {payload}")
+    }
+
+    #[test]
+    fn tool_calls_before_text_keep_stable_output_indices() {
+        let mut t = stream("m");
+        // Tool call arrives first with no preceding text.
+        t.process_line(&data_line(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"shell","arguments":""}}]}}]}"#,
+        ));
+        t.process_line(&data_line(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"cmd\":"}}]}}]}"#,
+        ));
+        // Text arrives only after the tool call has been announced.
+        t.process_line(&data_line(r#"{"choices":[{"delta":{"content":"hello"}}]}"#));
+        t.process_line(&data_line(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"ls\"}"}}]}}]}"#,
+        ));
+        t.process_line(&data_line(
+            r#"{"choices":[{"finish_reason":"tool_calls","delta":{}}]}"#,
+        ));
+        t.process_line(&data_line("[DONE]"));
+
+        let events = drain_events(&mut t);
+
+        // The tool call must be announced at index 1 (message reserves 0) and
+        // must NEVER change index once announced, even after text arrives.
+        let tool_added: Vec<&Value> = events
+            .iter()
+            .filter(|(et, d)| {
+                et == "response.output_item.added" && d["item"]["type"] == "function_call"
+            })
+            .map(|(_, d)| d)
+            .collect();
+        assert_eq!(tool_added.len(), 1);
+        assert_eq!(tool_added[0]["output_index"], json!(1));
+
+        let arg_deltas: Vec<&Value> = events
+            .iter()
+            .filter(|(et, _)| et == "response.function_call_arguments.delta")
+            .map(|(_, d)| d)
+            .collect();
+        assert_eq!(arg_deltas.len(), 2);
+        assert!(
+            arg_deltas.iter().all(|d| d["output_index"] == json!(1)),
+            "tool-call deltas must stay at output_index 1: {arg_deltas:?}"
+        );
+
+        // Exactly one item may occupy output_index 0: the assistant message.
+        let at_zero: Vec<&Value> = events
+            .iter()
+            .filter(|(et, d)| et == "response.output_item.added" && d["output_index"] == json!(0))
+            .map(|(_, d)| d)
+            .collect();
+        assert_eq!(at_zero.len(), 1);
+        assert_eq!(at_zero[0]["item"]["type"], json!("message"));
+
+        // Text deltas and the message close stay at index 0.
+        assert!(
+            events
+                .iter()
+                .filter(|(et, _)| et == "response.output_text.delta")
+                .all(|(_, d)| d["output_index"] == json!(0))
+        );
+
+        // The completed response carries both items, message first.
+        let completed = events
+            .iter()
+            .find(|(et, _)| et == "response.completed")
+            .map(|(_, d)| d)
+            .expect("completed event");
+        let output = completed["response"]["output"].as_array().expect("output");
+        assert_eq!(output.len(), 2);
+        assert_eq!(output[0]["type"], json!("message"));
+        assert_eq!(output[0]["content"][0]["text"], json!("hello"));
+        assert_eq!(output[1]["type"], json!("function_call"));
+        assert_eq!(output[1]["name"], json!("shell"));
+        assert_eq!(output[1]["arguments"], json!("{\"cmd\":\"ls\"}"));
+    }
+
+    #[test]
+    fn pure_tool_call_stream_still_completes_with_dense_indices() {
+        let mut t = stream("m");
+        t.process_line(&data_line(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"shell","arguments":"{}"}}]}}]}"#,
+        ));
+        t.process_line(&data_line(
+            r#"{"choices":[{"finish_reason":"tool_calls","delta":{}}]}"#,
+        ));
+        t.process_line(&data_line("[DONE]"));
+        let events = drain_events(&mut t);
+        let added: Vec<&Value> = events
+            .iter()
+            .filter(|(et, _)| et == "response.output_item.added")
+            .map(|(_, d)| d)
+            .collect();
+        // Message at 0, function_call at 1: dense and stable.
+        assert_eq!(added.len(), 2);
+        assert_eq!(added[0]["output_index"], json!(0));
+        assert_eq!(added[1]["output_index"], json!(1));
+        let completed = events
+            .iter()
+            .find(|(et, _)| et == "response.completed")
+            .map(|(_, d)| d)
+            .expect("completed");
+        assert_eq!(completed["response"]["status"], json!("completed"));
+    }
+
+    #[test]
+    fn text_then_tool_call_keeps_existing_behavior() {
+        let mut t = stream("m");
+        t.process_line(&data_line(
+            r#"{"choices":[{"delta":{"content":"thinking"}}]}"#,
+        ));
+        t.process_line(&data_line(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"shell","arguments":"{}"}}]}}]}"#,
+        ));
+        t.process_line(&data_line(
+            r#"{"choices":[{"finish_reason":"tool_calls","delta":{}}]}"#,
+        ));
+        t.process_line(&data_line("[DONE]"));
+        let events = drain_events(&mut t);
+        let tool_added = events
+            .iter()
+            .find(|(et, d)| {
+                et == "response.output_item.added" && d["item"]["type"] == "function_call"
+            })
+            .map(|(_, d)| d)
+            .expect("tool call added");
+        assert_eq!(tool_added["output_index"], json!(1));
     }
 }

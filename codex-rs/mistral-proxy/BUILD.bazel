@@ -1,0 +1,9 @@
+load("//:defs.bzl", "codex_rust_crate")
+
+codex_rust_crate(
+    name = "mistral-proxy",
+    crate_name = "codex_mistral_proxy",
+    # prompt.md is embedded via include_str! in src/models_translate.rs.
+    compile_data = ["prompt.md"],
+    integration_compile_data_extra = ["tests/fixtures/mistral_models.json"],
+)

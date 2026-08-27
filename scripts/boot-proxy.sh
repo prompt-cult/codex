@@ -23,7 +23,9 @@ info_file="$run_dir/$proxy.json"
 
 mkdir -p "$run_dir"
 
-key="$(awk -F= -v k="export $key_env" '$1 == k { sub(/^[^=]*=/, "", $0); print; exit }' "$env_file")"
+# Accept both documented dotenvy format (KEY=value) and shell-style
+# (export KEY=value); the repo's own .env files have used both.
+key="$(awk -v k="$key_env" '{ line = $0; sub(/^export[ \t]+/, "", line); if (index(line, k "=") == 1) { print substr(line, length(k) + 2); exit } }' "$env_file")"
 if [ -z "$key" ]; then
   echo "error: $key_env not found in $env_file" >&2
   exit 1

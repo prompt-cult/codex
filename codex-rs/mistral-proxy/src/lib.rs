@@ -157,6 +157,8 @@ struct ProxyConfig {
 pub fn run_main(args: Args) -> Result<()> {
     let auth_header = read_auth_header()?;
 
+    // CODEX_CONFIG_DIR takes precedence over CODEX_HOME inside
+    // find_codex_home; the proxy config lives next to the TUI's config.toml.
     let config_dir = codex_utils_home_dir::find_codex_home()
         .context("resolving codex config dir for proxy config")?;
     let resolved = load_config(KIND, config_dir.as_path(), &MISTRAL_DEFAULTS)?;
@@ -450,7 +452,8 @@ fn handle_responses_translate(
 
     // Streaming: translate Mistral Chat SSE → OAI Responses SSE.
     let verbose_req = verbose.then_some(req_id);
-    let translator = translate_sse::MistralToOaiStream::new(model, upstream_resp, verbose_req);
+    let translator =
+        translate_sse::MistralToOaiStream::new(model, Box::new(upstream_resp), verbose_req);
     let resp = Response::new(
         StatusCode(200),
         vec![

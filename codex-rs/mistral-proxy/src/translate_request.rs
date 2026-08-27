@@ -35,7 +35,14 @@ pub(crate) fn oai_to_mistral(oai: &Value) -> Value {
     let input = oai["input"].as_array();
 
     let (system_from_input, messages) = convert_input_to_messages(input);
-    let system = instructions.or(system_from_input.as_deref());
+    // The OAI Responses API treats top-level `instructions` as a prepended
+    // system turn; system/developer messages embedded in `input` are
+    // additional context, not alternatives. Concatenate so neither is lost.
+    let system = match (instructions, system_from_input.as_deref()) {
+        (Some(a), Some(b)) => Some(format!("{a}\n\n{b}")),
+        (Some(a), None) => Some(a.to_string()),
+        (None, b) => b.map(str::to_string),
+    };
 
     let tools = convert_tools(oai["tools"].as_array());
 
@@ -304,6 +311,38 @@ fn convert_tools(tools: Option<&Vec<Value>>) -> Vec<Value> {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn instructions_and_input_system_message_are_concatenated() {
+        let oai = json!({
+            "model": "m",
+            "instructions": "Top-level instructions.",
+            "input": [
+                {"type": "message", "role": "developer", "content": "Input-embedded context."},
+                {"type": "message", "role": "user", "content": "Hello"}
+            ]
+        });
+        let result = oai_to_mistral(&oai);
+        assert_eq!(result["messages"][0]["role"], "system");
+        assert_eq!(
+            result["messages"][0]["content"],
+            "Top-level instructions.\n\nInput-embedded context."
+        );
+        assert_eq!(result["messages"][1]["role"], "user");
+    }
+
+    #[test]
+    fn input_system_message_survives_without_instructions() {
+        let oai = json!({
+            "model": "m",
+            "input": [
+                {"type": "message", "role": "system", "content": "Only embedded."},
+                {"type": "message", "role": "user", "content": "Hello"}
+            ]
+        });
+        let result = oai_to_mistral(&oai);
+        assert_eq!(result["messages"][0]["content"], "Only embedded.");
+    }
 
     #[test]
     fn test_basic_request_translation() {
