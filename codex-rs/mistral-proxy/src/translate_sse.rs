@@ -82,10 +82,19 @@ pub(crate) struct MistralToOaiStream {
     done: bool,
     /// Residual bytes from the last upstream read (partial SSE line).
     line_buf: Vec<u8>,
+    /// Verbose-mode request number; when set, the upstream-reported model from
+    /// the first chunk is logged once as proof of which model actually served.
+    verbose_req: Option<u64>,
+    /// Whether the upstream model has already been logged for this stream.
+    upstream_model_logged: bool,
 }
 
 impl MistralToOaiStream {
-    pub(crate) fn new(model: String, upstream: reqwest::blocking::Response) -> Self {
+    pub(crate) fn new(
+        model: String,
+        upstream: reqwest::blocking::Response,
+        verbose_req: Option<u64>,
+    ) -> Self {
         let resp_id = format!("resp_{}", Uuid::new_v4().simple());
         let created_at = time::SystemTime::now()
             .duration_since(time::UNIX_EPOCH)
@@ -107,6 +116,8 @@ impl MistralToOaiStream {
             upstream,
             done: false,
             line_buf: Vec::new(),
+            verbose_req,
+            upstream_model_logged: false,
         }
     }
 }
@@ -178,10 +189,17 @@ impl MistralToOaiStream {
         let ev: Value = match serde_json::from_str(payload) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("mistral-proxy: non-JSON SSE: {e} — {payload}");
+                eprintln!("proxy-mistral-ai: non-JSON SSE: {e} — {payload}");
                 return;
             }
         };
+
+        if let (Some(req_id), false) = (self.verbose_req, self.upstream_model_logged)
+            && let Some(upstream_model) = ev["model"].as_str()
+        {
+            eprintln!("proxy-mistral-ai: req#{req_id} upstream_model={upstream_model}");
+            self.upstream_model_logged = true;
+        }
 
         // Some providers send a final usage-only chunk before [DONE].
         if let Some(usage) = ev.get("usage").filter(|u| !u.is_null()) {

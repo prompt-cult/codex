@@ -20,7 +20,10 @@ anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 codex-process-hardening = { workspace = true }
 codex-protocol = { workspace = true }
+codex-proxy-protocol = { workspace = true }
+codex-utils-home-dir = { workspace = true }
 ctor = { workspace = true }
+globset = { workspace = true }
 libc = { workspace = true }
 reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
 serde = { workspace = true, features = ["derive"] }

@@ -24,12 +24,19 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
 use clap::Parser;
+use codex_proxy_protocol::LogLevel;
+use codex_proxy_protocol::ProxyDefaults;
+use codex_proxy_protocol::ProxyKind;
+use codex_proxy_protocol::load_config;
+use globset::GlobSet;
 use reqwest::Url;
 use reqwest::blocking::Client;
 use reqwest::header::AUTHORIZATION;
@@ -51,6 +58,27 @@ mod translate_request;
 mod translate_sse;
 
 use read_api_key::read_auth_header;
+
+/// This proxy's protocol identity; prefixes every log line and names the
+/// config file. See `docs/proxy-protocol.md`.
+const KIND: ProxyKind = ProxyKind::MistralAi;
+
+const DEFAULT_UPSTREAM_BASE: &str = "https://api.mistral.ai/v1";
+
+/// Compiled-in defaults used when no `proxy-mistral-ai.jsonc` exists. The
+/// exclusion list drops non-chat-purpose families from discovery; the bare
+/// alias `glm-5-2` is exact-matched so `zai-glm-5-2` still passes.
+const MISTRAL_DEFAULTS: ProxyDefaults = ProxyDefaults {
+    upstream_base_url: DEFAULT_UPSTREAM_BASE,
+    model_exclude_globs: &[
+        "*-ocr-*",
+        "*-mini-*",
+        "magistral-*",
+        "ministral-*",
+        "voxtral-*",
+        "glm-5-2",
+    ],
+};
 
 /// Classification of an incoming request path, ignoring any query string.
 ///
@@ -97,10 +125,11 @@ pub struct Args {
     #[arg(long)]
     pub http_shutdown: bool,
 
-    /// Base URL of the Mistral API (default: https://api.mistral.ai/v1).
+    /// Base URL of the Mistral API. Overrides `upstream_base_url` in
+    /// `proxy-mistral-ai.jsonc`; default: https://api.mistral.ai/v1.
     /// Chat requests go to `{base}/chat/completions`, model listings to `{base}/models`.
-    #[arg(long, default_value = "https://api.mistral.ai/v1")]
-    pub upstream_base: String,
+    #[arg(long)]
+    pub upstream_base: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -114,14 +143,37 @@ struct ProxyConfig {
     upstream_base: String,
     /// Pre-parsed host header value for upstream requests
     host_header: HeaderValue,
+    /// Glob exclusions applied to discovered model IDs.
+    exclude: GlobSet,
+    /// Logging verbosity from the proxy config file.
+    log_level: LogLevel,
+    /// Per-process request counter for verbose routing logs.
+    request_counter: AtomicU64,
 }
 
 /// Entry point.
 pub fn run_main(args: Args) -> Result<()> {
     let auth_header = read_auth_header()?;
 
-    let upstream_base = args.upstream_base.trim_end_matches('/').to_string();
-    let parsed = Url::parse(&upstream_base).context("parsing --upstream-base")?;
+    let config_dir = codex_utils_home_dir::find_codex_home()
+        .context("resolving codex config dir for proxy config")?;
+    let resolved = load_config(KIND, config_dir.as_path(), &MISTRAL_DEFAULTS)?;
+    match &resolved.loaded_from {
+        Some(path) => eprintln!("{}: loaded config from {}", KIND.as_str(), path.display()),
+        None => eprintln!(
+            "{}: no {} found, using built-in defaults",
+            KIND.as_str(),
+            KIND.config_filename()
+        ),
+    }
+
+    // Precedence: CLI flag > config file > compiled-in default.
+    let upstream_base = args
+        .upstream_base
+        .or(resolved.upstream_base_url.clone())
+        .unwrap_or_else(|| DEFAULT_UPSTREAM_BASE.to_string());
+    let upstream_base = upstream_base.trim_end_matches('/').to_string();
+    let parsed = Url::parse(&upstream_base).context("parsing upstream base URL")?;
     let host = match (parsed.host_str(), parsed.port()) {
         (Some(h), Some(p)) => format!("{h}:{p}"),
         (Some(h), None) => h.to_string(),
@@ -133,6 +185,9 @@ pub fn run_main(args: Args) -> Result<()> {
     let config = Arc::new(ProxyConfig {
         upstream_base,
         host_header,
+        exclude: resolved.exclude,
+        log_level: resolved.log_level,
+        request_counter: AtomicU64::new(0),
     });
 
     let (listener, bound_addr) = bind_listener(args.port)?;
@@ -149,7 +204,8 @@ pub fn run_main(args: Args) -> Result<()> {
     );
 
     eprintln!(
-        "codex-mistral-proxy listening on {bound_addr} → {}",
+        "{} listening on {bound_addr} → {}",
+        KIND.as_str(),
         config.upstream_base
     );
 
@@ -169,7 +225,7 @@ pub fn run_main(args: Args) -> Result<()> {
             if method == Method::Get && route == RouteKind::Health {
                 let body = serde_json::json!({
                     "status": "ok",
-                    "proxy": "codex-mistral-proxy",
+                    "proxy": KIND.as_str(),
                     "upstream": config.upstream_base,
                 });
                 let data = serde_json::to_vec(&body).unwrap_or_default();
@@ -184,7 +240,7 @@ pub fn run_main(args: Args) -> Result<()> {
             }
 
             if let Err(e) = handle_request(&client, auth_header, &config, request) {
-                eprintln!("mistral-proxy error: {e}");
+                eprintln!("{} error: {e}", KIND.as_str());
             }
         });
     }
@@ -226,7 +282,7 @@ fn handle_request(
     let url = req.url().to_string();
     let route = classify_route(&url);
 
-    eprintln!("mistral-proxy: {method} {url} -> {route:?}");
+    eprintln!("{}: {method} {url} -> {route:?}", KIND.as_str());
 
     // GET /v1/models — translate Mistral's model list into the codex
     // `ModelsResponse` shape for dynamic discovery by the main app.
@@ -239,9 +295,9 @@ fn handle_request(
         return handle_responses_translate(client, auth_header, config, req);
     }
 
-    eprintln!("mistral-proxy: 403 forbidden for {method} {url}");
+    eprintln!("{}: 403 forbidden for {method} {url}", KIND.as_str());
     if let Err(e) = req.respond(Response::new_empty(StatusCode(403))) {
-        eprintln!("mistral-proxy: failed to respond 403: {e}");
+        eprintln!("{}: failed to respond 403: {e}", KIND.as_str());
     }
     Ok(())
 }
@@ -249,9 +305,9 @@ fn handle_request(
 /// GET /v1/models: fetch `{upstream}/models` and translate Mistral's raw list
 /// into the codex `ModelsResponse` shape so `codex-api` can deserialize it.
 ///
-/// Only chat-capable models are returned. On any upstream error the original
-/// error response is relayed unchanged (so the app falls back to the bundled
-/// catalog rather than seeing a malformed body).
+/// Only chat-capable models are returned, minus any ID matching the configured
+/// exclusion globs. On any upstream error the original error response is
+/// relayed unchanged so the app can log the real cause.
 fn handle_models_request(
     client: &Client,
     auth_header: &'static str,
@@ -259,7 +315,7 @@ fn handle_models_request(
     req: Request,
 ) -> Result<()> {
     let upstream_url = format!("{}/models", config.upstream_base);
-    eprintln!("mistral-proxy: fetching upstream {upstream_url}");
+    eprintln!("{}: fetching upstream {upstream_url}", KIND.as_str());
 
     let mut headers = HeaderMap::new();
     let mut auth_value = HeaderValue::from_static(auth_header);
@@ -274,7 +330,8 @@ fn handle_models_request(
         .context("forwarding models request to upstream")?;
 
     eprintln!(
-        "mistral-proxy: upstream responded {}",
+        "{}: upstream responded {}",
+        KIND.as_str(),
         upstream_resp.status()
     );
 
@@ -286,12 +343,17 @@ fn handle_models_request(
     let raw = upstream_resp
         .bytes()
         .context("reading Mistral models response")?;
-    let models_response = models_translate::translate_mistral_models(&raw)
+    let translated = models_translate::translate_mistral_models(&raw, &config.exclude)
         .context("translating Mistral /models to ModelsResponse")?;
-    let model_count = models_response.models.len();
-    let data = serde_json::to_vec(&models_response).context("serializing ModelsResponse")?;
+    let kept = translated.response.models.len();
+    let data = serde_json::to_vec(&translated.response).context("serializing ModelsResponse")?;
 
-    eprintln!("mistral-proxy: translated {model_count} models for client");
+    eprintln!(
+        "{}: loaded {} models, {} after exclusions",
+        KIND.as_str(),
+        translated.chat_loaded,
+        kept
+    );
 
     let resp = Response::from_data(data)
         .with_status_code(StatusCode(200))
@@ -300,7 +362,7 @@ fn handle_models_request(
                 .unwrap_or_else(|_| unreachable!()),
         );
     if let Err(e) = req.respond(resp) {
-        eprintln!("mistral-proxy: failed to respond models: {e}");
+        eprintln!("{}: failed to respond models: {e}", KIND.as_str());
     }
     Ok(())
 }
@@ -322,7 +384,14 @@ fn handle_responses_translate(
     let model = body["model"].as_str().unwrap_or("").to_string();
     let is_stream = body["stream"].as_bool().unwrap_or(false);
 
-    eprintln!("→ model={model} stream={is_stream}");
+    let verbose = config.log_level == LogLevel::Verbose;
+    let req_id = config.request_counter.fetch_add(1, Ordering::Relaxed) + 1;
+    if verbose {
+        eprintln!(
+            "{}: req#{req_id} model={model} stream={is_stream}",
+            KIND.as_str()
+        );
+    }
 
     let mistral_body = translate_request::oai_to_mistral(&body);
     let upstream_url = format!("{}/chat/completions", config.upstream_base);
@@ -341,6 +410,13 @@ fn handle_responses_translate(
     if !is_stream {
         let mistral_body: serde_json::Value =
             upstream_resp.json().context("reading Mistral response")?;
+        if verbose {
+            let upstream_model = mistral_body["model"].as_str().unwrap_or("");
+            eprintln!(
+                "{}: req#{req_id} upstream_model={upstream_model}",
+                KIND.as_str()
+            );
+        }
         let oai_resp = translate_request::mistral_response_to_oai(&mistral_body, &model);
         let data = serde_json::to_vec(&oai_resp).unwrap_or_default();
         let resp = Response::from_data(data)
@@ -350,13 +426,14 @@ fn handle_responses_translate(
                     .unwrap_or_else(|_| unreachable!()),
             );
         if let Err(e) = req.respond(resp) {
-            eprintln!("mistral-proxy: failed to respond models: {e}");
+            eprintln!("{}: failed to respond models: {e}", KIND.as_str());
         }
         return Ok(());
     }
 
     // Streaming: translate Mistral Chat SSE → OAI Responses SSE.
-    let translator = translate_sse::MistralToOaiStream::new(model, upstream_resp);
+    let verbose_req = verbose.then_some(req_id);
+    let translator = translate_sse::MistralToOaiStream::new(model, upstream_resp, verbose_req);
     let resp = Response::new(
         StatusCode(200),
         vec![
@@ -370,7 +447,7 @@ fn handle_responses_translate(
         None,
     );
     if let Err(e) = req.respond(resp) {
-        eprintln!("mistral-proxy: failed to respond stream: {e}");
+        eprintln!("{}: failed to respond stream: {e}", KIND.as_str());
     }
     Ok(())
 }
@@ -454,7 +531,7 @@ fn relay_response(req: Request, upstream_resp: reqwest::blocking::Response) -> R
         None,
     );
     if let Err(e) = req.respond(response) {
-        eprintln!("mistral-proxy: failed to relay response: {e}");
+        eprintln!("{}: failed to relay response: {e}", KIND.as_str());
     }
     Ok(())
 }

@@ -45,20 +45,45 @@ struct MistralCapabilities {
     completion_chat: bool,
 }
 
+/// Result of translating a Mistral `/models` payload.
+#[derive(Debug)]
+pub struct TranslatedModels {
+    /// The codex `ModelsResponse` to serve the client.
+    pub response: ModelsResponse,
+    /// Chat-capable models seen upstream before glob exclusions, so the proxy
+    /// can log `loaded N models, M after exclusions`.
+    pub chat_loaded: usize,
+}
+
 /// Parse raw Mistral `/models` JSON and build a codex [`ModelsResponse`].
-pub fn translate_mistral_models(raw: &[u8]) -> Result<ModelsResponse> {
+///
+/// Models whose ID matches any glob in `exclude` are dropped before
+/// priorities are assigned, so the surviving list is densely ordered.
+pub fn translate_mistral_models(
+    raw: &[u8],
+    exclude: &globset::GlobSet,
+) -> Result<TranslatedModels> {
     let list: MistralModelList =
         serde_json::from_slice(raw).context("parsing Mistral /models response")?;
 
-    let models = list
+    let chat_capable: Vec<MistralModel> = list
         .data
         .into_iter()
         .filter(|m| m.capabilities.completion_chat)
+        .collect();
+    let chat_loaded = chat_capable.len();
+
+    let models = chat_capable
+        .into_iter()
+        .filter(|m| !exclude.is_match(&m.id))
         .enumerate()
         .map(|(index, m)| model_info_for(index, m))
         .collect();
 
-    Ok(ModelsResponse { models })
+    Ok(TranslatedModels {
+        response: ModelsResponse { models },
+        chat_loaded,
+    })
 }
 
 /// Build a fully-populated [`ModelInfo`] for a chat-capable Mistral model.
@@ -104,22 +129,67 @@ fn model_info_for(index: usize, m: MistralModel) -> ModelInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use globset::Glob;
+    use globset::GlobSetBuilder;
     use pretty_assertions::assert_eq;
 
     const FIXTURE: &str = include_str!("../tests/fixtures/mistral_models.json");
 
+    fn no_exclusions() -> globset::GlobSet {
+        GlobSetBuilder::new().build().expect("empty globset")
+    }
+
+    fn globset_of(patterns: &[&str]) -> globset::GlobSet {
+        let mut builder = GlobSetBuilder::new();
+        for pattern in patterns {
+            builder.add(Glob::new(pattern).expect("valid glob"));
+        }
+        builder.build().expect("globset")
+    }
+
     #[test]
     fn filters_to_chat_capable_models() {
-        let resp = translate_mistral_models(FIXTURE.as_bytes()).expect("translate");
+        let out =
+            translate_mistral_models(FIXTURE.as_bytes(), &no_exclusions()).expect("translate");
         // Fixture: zai-glm-5-2 and mistral-medium-latest are chat; mistral-embed is not.
-        assert_eq!(resp.models.len(), 2);
-        assert!(resp.models.iter().all(|m| m.slug != "mistral-embed"));
+        assert_eq!(out.response.models.len(), 2);
+        assert_eq!(out.chat_loaded, 2);
+        assert!(
+            out.response
+                .models
+                .iter()
+                .all(|m| m.slug != "mistral-embed")
+        );
+    }
+
+    #[test]
+    fn exclusion_globs_drop_matching_models() {
+        let exclude = globset_of(&["zai-glm-5-2", "*-medium-*"]);
+        let out = translate_mistral_models(FIXTURE.as_bytes(), &exclude).expect("translate");
+        assert!(out.response.models.is_empty());
+        assert_eq!(out.chat_loaded, 2);
+    }
+
+    #[test]
+    fn exact_exclusion_keeps_prefixed_variant() {
+        let exclude = globset_of(&["glm-5-2"]);
+        let raw = br#"{"object":"list","data":[
+            {"id":"glm-5-2","capabilities":{"completion_chat":true}},
+            {"id":"zai-glm-5-2","capabilities":{"completion_chat":true}}
+        ]}"#;
+        let out = translate_mistral_models(raw, &exclude).expect("translate");
+        assert_eq!(out.response.models.len(), 1);
+        assert_eq!(out.response.models[0].slug, "zai-glm-5-2");
+        // Priorities are dense after filtering.
+        assert_eq!(out.response.models[0].priority, 0);
     }
 
     #[test]
     fn mvp_model_has_expected_fields() {
-        let resp = translate_mistral_models(FIXTURE.as_bytes()).expect("translate");
-        let glm = resp
+        let out =
+            translate_mistral_models(FIXTURE.as_bytes(), &no_exclusions()).expect("translate");
+        let glm = out
+            .response
             .models
             .iter()
             .find(|m| m.slug == "zai-glm-5-2")
@@ -133,8 +203,10 @@ mod tests {
 
     #[test]
     fn defaults_context_window_when_missing() {
-        let resp = translate_mistral_models(FIXTURE.as_bytes()).expect("translate");
-        let medium = resp
+        let out =
+            translate_mistral_models(FIXTURE.as_bytes(), &no_exclusions()).expect("translate");
+        let medium = out
+            .response
             .models
             .iter()
             .find(|m| m.slug == "mistral-medium-latest")
@@ -145,15 +217,18 @@ mod tests {
     #[test]
     fn output_round_trips_through_models_response_deserializer() {
         // Mirrors the exact call codex-api makes at endpoint/models.rs:64.
-        let resp = translate_mistral_models(FIXTURE.as_bytes()).expect("translate");
-        let json = serde_json::to_vec(&resp).expect("serialize");
+        let out =
+            translate_mistral_models(FIXTURE.as_bytes(), &no_exclusions()).expect("translate");
+        let json = serde_json::to_vec(&out.response).expect("serialize");
         let reparsed: ModelsResponse = serde_json::from_slice(&json).expect("deserialize");
-        assert_eq!(reparsed, resp);
+        assert_eq!(reparsed, out.response);
     }
 
     #[test]
     fn empty_data_yields_empty_models() {
-        let resp = translate_mistral_models(br#"{"object":"list","data":[]}"#).expect("translate");
-        assert!(resp.models.is_empty());
+        let out = translate_mistral_models(br#"{"object":"list","data":[]}"#, &no_exclusions())
+            .expect("translate");
+        assert!(out.response.models.is_empty());
+        assert_eq!(out.chat_loaded, 0);
     }
 }

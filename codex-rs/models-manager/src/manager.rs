@@ -216,11 +216,21 @@ impl ModelsManager {
     ) -> Self {
         let auth_manager = required_auth_manager_for_provider(auth_manager, &provider);
         let cache_path = {
-            use sha2::{Digest, Sha256};
+            use sha2::Digest;
+            use sha2::Sha256;
             let key_input = format!(
                 "{}|{}",
-                if provider.is_local_proxy() { "local_proxy" } else { "openai" },
-                provider.base_url.as_deref().unwrap_or("").trim_end_matches('/').to_lowercase()
+                if provider.is_local_proxy() {
+                    "local_proxy"
+                } else {
+                    "openai"
+                },
+                provider
+                    .base_url
+                    .as_deref()
+                    .unwrap_or("")
+                    .trim_end_matches('/')
+                    .to_lowercase()
             );
             let digest = format!("{:x}", Sha256::digest(key_input.as_bytes()));
             let cache_dir = codex_home.join("cache");
@@ -228,18 +238,19 @@ impl ModelsManager {
                 let _ = std::fs::create_dir_all(&cache_dir);
             }
             let new_path = cache_dir.join(format!("models_{}.json", &digest[..16]));
-            
+
             let old_path = codex_home.join(MODEL_CACHE_FILE);
             if old_path.exists() {
                 if !provider.is_local_proxy() {
                     let _ = std::fs::rename(&old_path, &new_path).or_else(|_| {
-                        std::fs::copy(&old_path, &new_path).and_then(|_| std::fs::remove_file(&old_path))
+                        std::fs::copy(&old_path, &new_path)
+                            .and_then(|_| std::fs::remove_file(&old_path))
                     });
                 } else {
                     let _ = std::fs::remove_file(&old_path);
                 }
             }
-            
+
             new_path
         };
         let cache_manager = ModelsCacheManager::new(cache_path, DEFAULT_MODEL_CACHE_TTL);
