@@ -64,6 +64,26 @@ struct SettingsFile {
     upstream_base_url: Option<String>,
     model_exclude_globs: Option<Vec<String>>,
     log_level: Option<LogLevel>,
+    /// Per-model metadata overrides applied to discovered models. The key is
+    /// the upstream model ID; unknown keys are ignored so stale entries do
+    /// not break discovery when a provider retires a model.
+    model_overrides: Option<std::collections::HashMap<String, ModelOverride>>,
+}
+
+/// Metadata override for one discovered model. Every field is optional; a
+/// present field replaces the value the proxy would otherwise synthesize.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ModelOverride {
+    /// System instructions served with the model in discovery. Codex uses
+    /// these verbatim as the session's base instructions, which is the
+    /// correct place to pin identity for models that self-report a
+    /// canonicalized name (e.g. a `zai-glm-*` model answering
+    /// "I am mistral-code-agent-latest").
+    pub base_instructions: Option<String>,
+    /// Absolute path to a UTF-8 file whose contents replace
+    /// `base_instructions`, for instructions too large for inline JSONC.
+    pub base_instructions_file: Option<std::path::PathBuf>,
 }
 
 /// The effective configuration a proxy runs with.
@@ -77,6 +97,9 @@ pub struct ResolvedConfig {
     /// Number of glob patterns in [`Self::exclude`], for startup logging.
     pub exclude_pattern_count: usize,
     pub log_level: LogLevel,
+    /// Resolved per-model overrides (`base_instructions_file` contents
+    /// inlined), keyed by upstream model ID.
+    pub model_overrides: std::collections::HashMap<String, ModelOverride>,
     /// Absolute path of the settings file when one was loaded; `None` means
     /// compiled-in defaults are in use.
     pub loaded_from: Option<std::path::PathBuf>,
@@ -131,11 +154,33 @@ fn resolve(
     }
     let exclude = builder.build().context("compiling model exclusion globs")?;
 
+    let mut model_overrides = std::collections::HashMap::new();
+    for (model_id, ovr) in file.model_overrides.unwrap_or_default() {
+        if ovr.base_instructions.is_some() && ovr.base_instructions_file.is_some() {
+            anyhow::bail!(
+                "model override for {model_id:?} sets both base_instructions and \
+                 base_instructions_file; pick one"
+            );
+        }
+        let ovr = if let Some(path) = ovr.base_instructions_file.clone() {
+            let text = std::fs::read_to_string(&path)
+                .with_context(|| format!("reading base_instructions_file {}", path.display()))?;
+            ModelOverride {
+                base_instructions: Some(text),
+                base_instructions_file: None,
+            }
+        } else {
+            ovr
+        };
+        model_overrides.insert(model_id, ovr);
+    }
+
     Ok(ResolvedConfig {
         upstream_base_url: file.upstream_base_url,
         exclude_pattern_count: patterns.len(),
         exclude,
         log_level: file.log_level.unwrap_or_default(),
+        model_overrides,
         loaded_from,
     })
 }
@@ -247,6 +292,89 @@ mod tests {
         let cfg = load(dir.path()).expect("load");
         assert_eq!(cfg.exclude_pattern_count, 0);
         assert!(!cfg.exclude.is_match("mistral-ocr-2512"));
+    }
+
+    #[test]
+    fn model_overrides_inline_instructions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("proxy-mistral-ai.jsonc"),
+            r#"{
+                "model_overrides": {
+                    "zai-glm-5-2": {
+                        "base_instructions": "You are zai-glm-5-2."
+                    }
+                }
+            }"#,
+        )
+        .expect("write config");
+        let cfg = load(dir.path()).expect("load");
+        let ovr = cfg
+            .model_overrides
+            .get("zai-glm-5-2")
+            .expect("override present");
+        assert_eq!(
+            ovr.base_instructions.as_deref(),
+            Some("You are zai-glm-5-2.")
+        );
+    }
+
+    #[test]
+    fn model_overrides_instructions_file_is_inlined() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let instructions_path = dir.path().join("glm-instructions.md");
+        std::fs::write(&instructions_path, "You are zai-glm-5-2 from a file.").expect("write md");
+        std::fs::write(
+            dir.path().join("proxy-mistral-ai.jsonc"),
+            format!(
+                r#"{{ "model_overrides": {{ "zai-glm-5-2": {{ "base_instructions_file": "{}" }} }} }}"#,
+                instructions_path.display()
+            ),
+        )
+        .expect("write config");
+        let cfg = load(dir.path()).expect("load");
+        let ovr = cfg
+            .model_overrides
+            .get("zai-glm-5-2")
+            .expect("override present");
+        assert_eq!(
+            ovr.base_instructions.as_deref(),
+            Some("You are zai-glm-5-2 from a file.")
+        );
+    }
+
+    #[test]
+    fn model_overrides_both_fields_is_a_hard_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("proxy-mistral-ai.jsonc"),
+            r#"{
+                "model_overrides": {
+                    "x": {
+                        "base_instructions": "a",
+                        "base_instructions_file": "/tmp/b.md"
+                    }
+                }
+            }"#,
+        )
+        .expect("write config");
+        load(dir.path()).expect_err("conflicting fields must fail");
+    }
+
+    #[test]
+    fn model_overrides_missing_file_is_a_hard_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("proxy-mistral-ai.jsonc"),
+            r#"{
+                "model_overrides": {
+                    "x": { "base_instructions_file": "/nonexistent/nope.md" }
+                }
+            }"#,
+        )
+        .expect("write config");
+        let err = load(dir.path()).expect_err("missing file must fail");
+        assert!(format!("{err:#}").contains("nope.md"));
     }
 
     #[test]

@@ -55,13 +55,22 @@ pub struct TranslatedModels {
     pub chat_loaded: usize,
 }
 
+/// Per-model metadata override applied during translation.
+#[derive(Debug, Default, Clone)]
+pub struct ModelTranslateOverride {
+    /// Replacement system instructions for the discovered model.
+    pub base_instructions: Option<String>,
+}
+
 /// Parse raw Mistral `/models` JSON and build a codex [`ModelsResponse`].
 ///
 /// Models whose ID matches any glob in `exclude` are dropped before
 /// priorities are assigned, so the surviving list is densely ordered.
+/// `overrides` is keyed by upstream model ID.
 pub fn translate_mistral_models(
     raw: &[u8],
     exclude: &globset::GlobSet,
+    overrides: &std::collections::HashMap<String, ModelTranslateOverride>,
 ) -> Result<TranslatedModels> {
     let list: MistralModelList =
         serde_json::from_slice(raw).context("parsing Mistral /models response")?;
@@ -77,7 +86,10 @@ pub fn translate_mistral_models(
         .into_iter()
         .filter(|m| !exclude.is_match(&m.id))
         .enumerate()
-        .map(|(index, m)| model_info_for(index, m))
+        .map(|(index, m)| {
+            let ovr = overrides.get(&m.id).cloned().unwrap_or_default();
+            model_info_for(index, m, ovr)
+        })
         .collect();
 
     Ok(TranslatedModels {
@@ -91,7 +103,13 @@ pub fn translate_mistral_models(
 /// `ModelInfo` has no `Default`, so every field is set explicitly. Optional and
 /// reasoning-related metadata Mistral does not provide is left empty/`None`;
 /// users can override context window and related limits via config.
-fn model_info_for(index: usize, m: MistralModel) -> ModelInfo {
+/// Codex base instructions served for every discovered model unless a
+/// `model_overrides` entry replaces them for a specific model. Includes an
+/// identity line so models answer "what model are you?" with the selected
+/// model ID instead of an upstream alias name.
+const DEFAULT_BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
+
+fn model_info_for(index: usize, m: MistralModel, ovr: ModelTranslateOverride) -> ModelInfo {
     ModelInfo {
         slug: m.id.clone(),
         display_name: m.id,
@@ -105,7 +123,9 @@ fn model_info_for(index: usize, m: MistralModel) -> ModelInfo {
         additional_speed_tiers: Vec::new(),
         availability_nux: None,
         upgrade: None,
-        base_instructions: String::new(),
+        base_instructions: ovr
+            .base_instructions
+            .unwrap_or_else(|| DEFAULT_BASE_INSTRUCTIONS.to_string()),
         model_messages: None,
         supports_reasoning_summaries: false,
         default_reasoning_summary: ReasoningSummary::Auto,
@@ -139,6 +159,10 @@ mod tests {
         GlobSetBuilder::new().build().expect("empty globset")
     }
 
+    fn no_overrides() -> std::collections::HashMap<String, ModelTranslateOverride> {
+        std::collections::HashMap::new()
+    }
+
     fn globset_of(patterns: &[&str]) -> globset::GlobSet {
         let mut builder = GlobSetBuilder::new();
         for pattern in patterns {
@@ -149,8 +173,8 @@ mod tests {
 
     #[test]
     fn filters_to_chat_capable_models() {
-        let out =
-            translate_mistral_models(FIXTURE.as_bytes(), &no_exclusions()).expect("translate");
+        let out = translate_mistral_models(FIXTURE.as_bytes(), &no_exclusions(), &no_overrides())
+            .expect("translate");
         // Fixture: zai-glm-5-2 and mistral-medium-latest are chat; mistral-embed is not.
         assert_eq!(out.response.models.len(), 2);
         assert_eq!(out.chat_loaded, 2);
@@ -165,7 +189,8 @@ mod tests {
     #[test]
     fn exclusion_globs_drop_matching_models() {
         let exclude = globset_of(&["zai-glm-5-2", "*-medium-*"]);
-        let out = translate_mistral_models(FIXTURE.as_bytes(), &exclude).expect("translate");
+        let out = translate_mistral_models(FIXTURE.as_bytes(), &exclude, &no_overrides())
+            .expect("translate");
         assert!(out.response.models.is_empty());
         assert_eq!(out.chat_loaded, 2);
     }
@@ -177,7 +202,7 @@ mod tests {
             {"id":"glm-5-2","capabilities":{"completion_chat":true}},
             {"id":"zai-glm-5-2","capabilities":{"completion_chat":true}}
         ]}"#;
-        let out = translate_mistral_models(raw, &exclude).expect("translate");
+        let out = translate_mistral_models(raw, &exclude, &no_overrides()).expect("translate");
         assert_eq!(out.response.models.len(), 1);
         assert_eq!(out.response.models[0].slug, "zai-glm-5-2");
         // Priorities are dense after filtering.
@@ -186,8 +211,8 @@ mod tests {
 
     #[test]
     fn mvp_model_has_expected_fields() {
-        let out =
-            translate_mistral_models(FIXTURE.as_bytes(), &no_exclusions()).expect("translate");
+        let out = translate_mistral_models(FIXTURE.as_bytes(), &no_exclusions(), &no_overrides())
+            .expect("translate");
         let glm = out
             .response
             .models
@@ -203,8 +228,8 @@ mod tests {
 
     #[test]
     fn defaults_context_window_when_missing() {
-        let out =
-            translate_mistral_models(FIXTURE.as_bytes(), &no_exclusions()).expect("translate");
+        let out = translate_mistral_models(FIXTURE.as_bytes(), &no_exclusions(), &no_overrides())
+            .expect("translate");
         let medium = out
             .response
             .models
@@ -217,17 +242,62 @@ mod tests {
     #[test]
     fn output_round_trips_through_models_response_deserializer() {
         // Mirrors the exact call codex-api makes at endpoint/models.rs:64.
-        let out =
-            translate_mistral_models(FIXTURE.as_bytes(), &no_exclusions()).expect("translate");
+        let out = translate_mistral_models(FIXTURE.as_bytes(), &no_exclusions(), &no_overrides())
+            .expect("translate");
         let json = serde_json::to_vec(&out.response).expect("serialize");
         let reparsed: ModelsResponse = serde_json::from_slice(&json).expect("deserialize");
         assert_eq!(reparsed, out.response);
     }
 
     #[test]
-    fn empty_data_yields_empty_models() {
-        let out = translate_mistral_models(br#"{"object":"list","data":[]}"#, &no_exclusions())
+    fn default_instructions_come_from_prompt_md() {
+        let out = translate_mistral_models(FIXTURE.as_bytes(), &no_exclusions(), &no_overrides())
             .expect("translate");
+        let glm = out
+            .response
+            .models
+            .iter()
+            .find(|m| m.slug == "zai-glm-5-2")
+            .expect("glm present");
+        assert!(glm.base_instructions.contains("Prompt Cult"));
+        assert!(glm.base_instructions.contains("Model identity"));
+    }
+
+    #[test]
+    fn override_replaces_base_instructions_for_one_model() {
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert(
+            "zai-glm-5-2".to_string(),
+            ModelTranslateOverride {
+                base_instructions: Some("You are zai-glm-5-2, period.".to_string()),
+            },
+        );
+        let out = translate_mistral_models(FIXTURE.as_bytes(), &no_exclusions(), &overrides)
+            .expect("translate");
+        let glm = out
+            .response
+            .models
+            .iter()
+            .find(|m| m.slug == "zai-glm-5-2")
+            .expect("glm present");
+        assert_eq!(glm.base_instructions, "You are zai-glm-5-2, period.");
+        let medium = out
+            .response
+            .models
+            .iter()
+            .find(|m| m.slug == "mistral-medium-latest")
+            .expect("medium present");
+        assert!(medium.base_instructions.contains("Prompt Cult"));
+    }
+
+    #[test]
+    fn empty_data_yields_empty_models() {
+        let out = translate_mistral_models(
+            br#"{"object":"list","data":[]}"#,
+            &no_exclusions(),
+            &no_overrides(),
+        )
+        .expect("translate");
         assert!(out.response.models.is_empty());
         assert_eq!(out.chat_loaded, 0);
     }

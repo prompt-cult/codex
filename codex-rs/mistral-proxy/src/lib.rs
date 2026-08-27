@@ -145,6 +145,8 @@ struct ProxyConfig {
     host_header: HeaderValue,
     /// Glob exclusions applied to discovered model IDs.
     exclude: GlobSet,
+    /// Per-model metadata overrides from the proxy config file.
+    model_overrides: std::collections::HashMap<String, models_translate::ModelTranslateOverride>,
     /// Logging verbosity from the proxy config file.
     log_level: LogLevel,
     /// Per-process request counter for verbose routing logs.
@@ -182,10 +184,24 @@ pub fn run_main(args: Args) -> Result<()> {
     let host_header =
         HeaderValue::from_str(&host).context("constructing Host header from upstream URL")?;
 
+    let model_overrides = resolved
+        .model_overrides
+        .iter()
+        .map(|(id, ovr)| {
+            (
+                id.clone(),
+                models_translate::ModelTranslateOverride {
+                    base_instructions: ovr.base_instructions.clone(),
+                },
+            )
+        })
+        .collect();
+
     let config = Arc::new(ProxyConfig {
         upstream_base,
         host_header,
         exclude: resolved.exclude,
+        model_overrides,
         log_level: resolved.log_level,
         request_counter: AtomicU64::new(0),
     });
@@ -343,8 +359,9 @@ fn handle_models_request(
     let raw = upstream_resp
         .bytes()
         .context("reading Mistral models response")?;
-    let translated = models_translate::translate_mistral_models(&raw, &config.exclude)
-        .context("translating Mistral /models to ModelsResponse")?;
+    let translated =
+        models_translate::translate_mistral_models(&raw, &config.exclude, &config.model_overrides)
+            .context("translating Mistral /models to ModelsResponse")?;
     let kept = translated.response.models.len();
     let data = serde_json::to_vec(&translated.response).context("serializing ModelsResponse")?;
 

@@ -43,6 +43,15 @@ Prompt Cult proxy and will be replaced with a compliant implementation.
     (Mistral defaults: `["*-ocr-*", "*-mini-*", "magistral-*", "ministral-*",
     "voxtral-*", "glm-5-2"]`). An empty list disables filtering.
   - `log_level` — `"normal"` (default) or `"verbose"`; see §5.
+  - `model_overrides` — map from upstream model ID to per-model metadata.
+    Recognised fields: `base_instructions` (inline system instructions) or
+    `base_instructions_file` (absolute path to a UTF-8 file, contents inlined;
+    mutually exclusive with the inline form). Overrides are applied to the
+    discovered `ModelInfo`, so codex uses them as the session's base
+    instructions verbatim. Keys naming unknown/retired models are ignored.
+    Use this to pin model identity when a provider canonicalises aliases —
+    e.g. `zai-glm-5-2` requests being served by a backend that calls itself
+    `mistral-code-agent-latest`.
 
 ## 3. Model discovery and filtering
 
@@ -60,6 +69,11 @@ Prompt Cult proxy and will be replaced with a compliant implementation.
   - Matching is case-sensitive against the upstream model ID.
 - A model matching ANY exclude glob is dropped. After translation the proxy
   MUST log `loaded N models, M after exclusions`.
+- A proxy MUST serve each surviving model with codex base instructions. If
+  the provider does not supply any, the proxy ships a default agentic prompt
+  containing an identity line directing the model to answer identity questions
+  with the selected model ID rather than an upstream alias name. See the
+  Mistral proxy's `prompt.md` for the reference text.
 - Regex was considered and rejected: globs cover prefix/suffix/contains/exact
   with no escaping hazards in a JSONC file.
 

@@ -66,8 +66,20 @@ ignored. Startup always logs whether the file was found.
 
   // "normal" (default) or "verbose" — verbose logs one line per proxied
   // /v1/responses request: request number, requested model, upstream model.
-  "log_level": "normal"
+  "log_level": "normal",
+
+  // Per-model metadata overrides, keyed by upstream model ID. Unknown keys
+  // are ignored. base_instructions (inline) and base_instructions_file
+  // (absolute path, contents inlined) are mutually exclusive. Use this to
+  // pin identity for models whose backend answers with an alias name:
+  // "model_overrides": {
+  //   "zai-glm-5-2": { "base_instructions_file": "/path/to/glm-prompt.md" }
+  // }
 }
+
+Without a per-model override, discovered models ship with the proxy's
+default prompt (`mistral-proxy/prompt.md`), which directs the model to
+answer "what model are you?" with the selected model ID.
 ```
 
 Discovery logs `loaded N models, M after exclusions` on every `/v1/models`
