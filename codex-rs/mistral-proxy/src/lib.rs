@@ -273,7 +273,10 @@ fn handle_models_request(
         .send()
         .context("forwarding models request to upstream")?;
 
-    eprintln!("mistral-proxy: upstream responded {}", upstream_resp.status());
+    eprintln!(
+        "mistral-proxy: upstream responded {}",
+        upstream_resp.status()
+    );
 
     // Relay non-200 responses verbatim so the app can log the real cause.
     if upstream_resp.status().as_u16() != 200 {

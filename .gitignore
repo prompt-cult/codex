@@ -109,3 +109,6 @@ __pycache__/
 
 .env
 .env
+
+# sed backup files
+*-e
