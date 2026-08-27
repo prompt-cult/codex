@@ -32,8 +32,6 @@ use crate::external_editor;
 use crate::file_search::FileSearchManager;
 use crate::history_cell;
 use crate::history_cell::HistoryCell;
-#[cfg(not(debug_assertions))]
-use crate::history_cell::UpdateAvailableHistoryCell;
 use crate::legacy_core::append_message_history_entry;
 use crate::legacy_core::config::Config;
 use crate::legacy_core::config::ConfigBuilder;
@@ -67,7 +65,6 @@ use crate::test_support::test_path_buf;
 use crate::test_support::test_path_display;
 use crate::tui;
 use crate::tui::TuiEvent;
-use crate::update_action::UpdateAction;
 use crate::version::CODEX_CLI_VERSION;
 use codex_ansi_escape::ansi_escape_line;
 use codex_app_server_client::AppServerRequestHandle;
@@ -293,7 +290,6 @@ pub struct AppExitInfo {
     pub token_usage: TokenUsage,
     pub thread_id: Option<ThreadId>,
     pub thread_name: Option<String>,
-    pub update_action: Option<UpdateAction>,
     pub exit_reason: ExitReason,
 }
 
@@ -303,7 +299,6 @@ impl AppExitInfo {
             token_usage: TokenUsage::default(),
             thread_id: None,
             thread_name: None,
-            update_action: None,
             exit_reason: ExitReason::Fatal(message.into()),
         }
     }
@@ -939,7 +934,6 @@ async fn handle_model_migration_prompt_if_needed(
                     token_usage: TokenUsage::default(),
                     thread_id: None,
                     thread_name: None,
-                    update_action: None,
                     exit_reason: ExitReason::UserRequested,
                 });
             }
@@ -992,9 +986,6 @@ pub(crate) struct App {
     environment_manager: Arc<EnvironmentManager>,
     remote_app_server_url: Option<String>,
     remote_app_server_auth_token: Option<String>,
-    /// Set when the user confirms an update; propagated on exit.
-    pub(crate) pending_update_action: Option<UpdateAction>,
-
     /// Tracks the thread we intentionally shut down while exiting the app.
     ///
     /// When this matches the active thread, its `ShutdownComplete` should lead to
@@ -3924,9 +3915,6 @@ impl App {
             .maybe_prompt_windows_sandbox_enable(should_prompt_windows_sandbox_nux_at_startup);
 
         let file_search = FileSearchManager::new(config.cwd.to_path_buf(), app_event_tx.clone());
-        #[cfg(not(debug_assertions))]
-        let upgrade_version = crate::updates::get_upgrade_version(&config);
-
         let mut app = Self {
             model_catalog,
             session_telemetry: session_telemetry.clone(),
@@ -3954,7 +3942,6 @@ impl App {
             environment_manager,
             remote_app_server_url,
             remote_app_server_auth_token,
-            pending_update_action: None,
             pending_shutdown_exit_thread_id: None,
             windows_sandbox: WindowsSandboxState::default(),
             thread_event_channels: HashMap::new(),
@@ -4022,31 +4009,7 @@ impl App {
         let mut listen_for_app_server_events = true;
         let mut waiting_for_initial_session_configured = wait_for_initial_session_configured;
 
-        #[cfg(not(debug_assertions))]
-        let pre_loop_exit_reason = if let Some(latest_version) = upgrade_version {
-            let control = app
-                .handle_event(
-                    tui,
-                    &mut app_server,
-                    AppEvent::InsertHistoryCell(Box::new(UpdateAvailableHistoryCell::new(
-                        latest_version,
-                        crate::update_action::get_update_action(),
-                    ))),
-                )
-                .await?;
-            match control {
-                AppRunControl::Continue => None,
-                AppRunControl::Exit(exit_reason) => Some(exit_reason),
-            }
-        } else {
-            None
-        };
-        #[cfg(debug_assertions)]
-        let pre_loop_exit_reason: Option<ExitReason> = None;
-
-        let exit_reason_result = if let Some(exit_reason) = pre_loop_exit_reason {
-            Ok(exit_reason)
-        } else {
+        let exit_reason_result = {
             loop {
                 let control = select! {
                     Some(event) = app_event_rx.recv() => {
@@ -4128,7 +4091,6 @@ impl App {
             token_usage: app.token_usage(),
             thread_id: app.chat_widget.thread_id(),
             thread_name: app.chat_widget.thread_name(),
-            update_action: app.pending_update_action,
             exit_reason,
         })
     }
@@ -9607,7 +9569,6 @@ guardian_approval = true
             environment_manager: Arc::new(EnvironmentManager::new(/*exec_server_url*/ None)),
             remote_app_server_url: None,
             remote_app_server_auth_token: None,
-            pending_update_action: None,
             pending_shutdown_exit_thread_id: None,
             windows_sandbox: WindowsSandboxState::default(),
             thread_event_channels: HashMap::new(),
@@ -9664,7 +9625,6 @@ guardian_approval = true
                 )),
                 remote_app_server_url: None,
                 remote_app_server_auth_token: None,
-                pending_update_action: None,
                 pending_shutdown_exit_thread_id: None,
                 windows_sandbox: WindowsSandboxState::default(),
                 thread_event_channels: HashMap::new(),

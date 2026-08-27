@@ -161,10 +161,6 @@ mod theme_picker;
 mod tooltips;
 mod tui;
 mod ui_consts;
-pub(crate) mod update_action;
-pub use update_action::UpdateAction;
-mod update_prompt;
-mod updates;
 mod version;
 #[cfg(not(target_os = "linux"))]
 mod voice;
@@ -1051,28 +1047,6 @@ async fn run_ratatui_app(
     let mut tui = Tui::new(terminal);
     let mut terminal_restore_guard = TerminalRestoreGuard::new();
 
-    #[cfg(not(debug_assertions))]
-    {
-        use crate::update_prompt::UpdatePromptOutcome;
-
-        let skip_update_prompt = cli.prompt.as_ref().is_some_and(|prompt| !prompt.is_empty());
-        if !skip_update_prompt {
-            match update_prompt::run_update_prompt_if_needed(&mut tui, &initial_config).await? {
-                UpdatePromptOutcome::Continue => {}
-                UpdatePromptOutcome::RunUpdate(action) => {
-                    terminal_restore_guard.restore()?;
-                    return Ok(AppExitInfo {
-                        token_usage: codex_protocol::protocol::TokenUsage::default(),
-                        thread_id: None,
-                        thread_name: None,
-                        update_action: Some(action),
-                        exit_reason: ExitReason::UserRequested,
-                    });
-                }
-            }
-        }
-    }
-
     // Initialize high-fidelity session event logging if enabled.
     session_log::maybe_init(&initial_config);
 
@@ -1142,7 +1116,6 @@ async fn run_ratatui_app(
                 token_usage: codex_protocol::protocol::TokenUsage::default(),
                 thread_id: None,
                 thread_name: None,
-                update_action: None,
                 exit_reason: ExitReason::UserRequested,
             });
         }
@@ -1186,7 +1159,6 @@ async fn run_ratatui_app(
             token_usage: codex_protocol::protocol::TokenUsage::default(),
             thread_id: None,
             thread_name: None,
-            update_action: None,
             exit_reason: ExitReason::Fatal(format!(
                 "No saved session found with ID {id_str}. Run `codex {action}` without an ID to choose from existing sessions."
             )),
@@ -1253,7 +1225,6 @@ async fn run_ratatui_app(
                         token_usage: codex_protocol::protocol::TokenUsage::default(),
                         thread_id: None,
                         thread_name: None,
-                        update_action: None,
                         exit_reason: ExitReason::UserRequested,
                     });
                 }
@@ -1320,7 +1291,6 @@ async fn run_ratatui_app(
                     token_usage: codex_protocol::protocol::TokenUsage::default(),
                     thread_id: None,
                     thread_name: None,
-                    update_action: None,
                     exit_reason: ExitReason::UserRequested,
                 });
             }
@@ -1365,7 +1335,6 @@ async fn run_ratatui_app(
                             token_usage: codex_protocol::protocol::TokenUsage::default(),
                             thread_id: None,
                             thread_name: None,
-                            update_action: None,
                             exit_reason: ExitReason::UserRequested,
                         });
                     }
