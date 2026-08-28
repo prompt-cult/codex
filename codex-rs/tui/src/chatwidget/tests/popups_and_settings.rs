@@ -1840,6 +1840,55 @@ async fn single_reasoning_option_skips_selection() {
 }
 
 #[tokio::test]
+async fn all_models_popup_closes_when_model_has_no_supported_efforts() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+
+    let preset = ModelPreset {
+        id: "proxy-no-efforts".to_string(),
+        model: "proxy-no-efforts".to_string(),
+        display_name: "proxy-no-efforts".to_string(),
+        description: "".to_string(),
+        default_reasoning_effort: ReasoningEffortConfig::Medium,
+        supported_reasoning_efforts: Vec::new(),
+        supports_personality: false,
+        additional_speed_tiers: Vec::new(),
+        is_default: false,
+        upgrade: None,
+        show_in_picker: true,
+        availability_nux: None,
+        supported_in_api: true,
+        input_modalities: default_input_modalities(),
+    };
+
+    chat.open_all_models_popup(vec![preset]);
+    let popup = render_bottom_popup(&chat, /*width*/ 80);
+    assert!(
+        popup.contains("Select Model and Effort"),
+        "expected the all-models popup to open; popup: {popup}"
+    );
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    let popup = render_bottom_popup(&chat, /*width*/ 80);
+    assert!(
+        !popup.contains("Select Model and Effort"),
+        "expected the all-models popup to close on select; popup: {popup}"
+    );
+
+    let mut events = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        events.push(ev);
+    }
+    assert!(
+        events
+            .iter()
+            .any(|ev| matches!(ev, AppEvent::OpenReasoningPopup { model } if model.model == "proxy-no-efforts")),
+        "expected OpenReasoningPopup to be sent; events: {events:?}"
+    );
+}
+
+#[tokio::test]
 async fn feedback_selection_popup_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
