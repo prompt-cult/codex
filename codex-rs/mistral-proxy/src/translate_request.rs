@@ -99,17 +99,63 @@ pub(crate) fn mistral_response_to_oai(mistral: &Value, model: &str) -> Value {
             let message = &choice["message"];
             let role = message["role"].as_str().unwrap_or("assistant");
 
-            // Text content → message output item.
-            if let Some(content) = message["content"].as_str()
-                && !content.is_empty()
-            {
+            // Reasoning models (e.g. zai-glm-5-3) return assistant `content`
+            // as a list of typed blocks instead of a string, so both shapes
+            // must be handled here.
+            let mut text_parts: Vec<&str> = Vec::new();
+            let mut reasoning_parts: Vec<&str> = Vec::new();
+            match &message["content"] {
+                Value::String(content) if !content.is_empty() => text_parts.push(content),
+                Value::Array(blocks) => {
+                    for block in blocks {
+                        match block["type"].as_str() {
+                            Some("text") => {
+                                if let Some(text) = block["text"].as_str()
+                                    && !text.is_empty()
+                                {
+                                    text_parts.push(text);
+                                }
+                            }
+                            Some("thinking") => {
+                                if let Some(inner) = block["thinking"].as_array() {
+                                    for part in inner {
+                                        if part["type"].as_str() == Some("text")
+                                            && let Some(text) = part["text"].as_str()
+                                            && !text.is_empty()
+                                        {
+                                            reasoning_parts.push(text);
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+
+            if !reasoning_parts.is_empty() {
+                let rs_id = format!("rs_{}", Uuid::new_v4().simple());
+                output.push(json!({
+                    "id": rs_id,
+                    "type": "reasoning",
+                    "summary": [],
+                    "content": [{"type": "reasoning_text", "text": reasoning_parts.concat()}],
+                    "encrypted_content": null,
+                }));
+            }
+
+            if !text_parts.is_empty() {
                 let msg_id = format!("msg_{}", Uuid::new_v4().simple());
                 output.push(json!({
                     "id": msg_id,
                     "type": "message",
                     "status": "completed",
                     "role": role,
-                    "content": [{"type": "output_text", "text": content, "annotations": []}],
+                    "content": [
+                        {"type": "output_text", "text": text_parts.concat(), "annotations": []}
+                    ],
                 }));
             }
 
@@ -456,5 +502,74 @@ mod tests {
         assert_eq!(output[1]["call_id"], "call_456");
         assert_eq!(result["usage"]["input_tokens"], 10,);
         assert_eq!(result["usage"]["output_tokens"], 5,);
+    }
+
+    #[test]
+    fn block_list_content_maps_thinking_to_reasoning_and_text_to_message() {
+        let mistral = json!({
+            "id": "chatcmpl-1",
+            "model": "zai-glm-5-3",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "thinking", "thinking": [{"type": "text", "text": "The user is asking"}], "closed": true},
+                        {"type": "text", "text": "pong zai-glm-5-3"}
+                    ]
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}
+        });
+
+        let result = mistral_response_to_oai(&mistral, "zai-glm-5-3");
+
+        assert_eq!(result["status"], "completed");
+        let output = result["output"]
+            .as_array()
+            .unwrap_or_else(|| unreachable!());
+        assert_eq!(output.len(), 2);
+        assert_eq!(output[0]["type"], "reasoning");
+        assert_eq!(
+            output[0]["content"],
+            json!([{"type": "reasoning_text", "text": "The user is asking"}])
+        );
+        assert_eq!(output[0]["summary"], json!([]));
+        assert_eq!(output[0]["encrypted_content"], Value::Null);
+        assert_eq!(output[1]["type"], "message");
+        assert_eq!(
+            output[1]["content"],
+            json!([{"type": "output_text", "text": "pong zai-glm-5-3", "annotations": []}])
+        );
+    }
+
+    #[test]
+    fn unknown_block_types_in_block_content_are_ignored() {
+        let mistral = json!({
+            "id": "chatcmpl-1",
+            "model": "zai-glm-5-3",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "image", "url": "https://example.test/x.png"},
+                        {"type": "text", "text": "only text survives"}
+                    ]
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+        });
+
+        let result = mistral_response_to_oai(&mistral, "zai-glm-5-3");
+
+        let output = result["output"]
+            .as_array()
+            .unwrap_or_else(|| unreachable!());
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0]["type"], "message");
+        assert_eq!(output[0]["content"][0]["text"], "only text survives");
     }
 }

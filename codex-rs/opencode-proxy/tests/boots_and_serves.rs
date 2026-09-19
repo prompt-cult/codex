@@ -61,6 +61,26 @@ const CHAT_SSE: &str = concat!(
     "\n",
 );
 
+/// Reasoning-model streaming fixture (captured live from zai-glm-5-3):
+/// thinking block deltas first, then a final mixed block list with the text.
+const CHAT_SSE_BLOCKS: &str = concat!(
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":[",
+    "{\"type\":\"thinking\",\"thinking\":[{\"type\":\"text\",\"text\":\"The user is asking\"}],\"closed\":true}]}}]}\n",
+    "\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":[",
+    "{\"type\":\"thinking\",\"thinking\":[{\"type\":\"text\",\"text\":\" what to reply\"}],\"closed\":true}]}}]}\n",
+    "\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":[",
+    "{\"type\":\"thinking\",\"thinking\":[{\"type\":\"text\",\"text\":\"…\"}],\"closed\":true},",
+    "{\"type\":\"text\",\"text\":\"pong zai-glm-5-3\"}]}}]}\n",
+    "\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],",
+    "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n",
+    "\n",
+    "data: [DONE]\n",
+    "\n",
+);
+
 /// Chat Completions JSON for non-streaming Chat-family requests.
 const CHAT_JSON: &str = r#"{
   "id": "chatcmpl-1",
@@ -156,7 +176,9 @@ fn start_mock() -> MockUpstream {
             {
                 (200, "application/json", MODELS_FIXTURE.to_string())
             } else if method == tiny_http::Method::Post && url.starts_with("/chat/completions") {
-                if body.contains("\"stream\":true") {
+                if body.contains("kimi-k2") {
+                    (200, "text/event-stream", CHAT_SSE_BLOCKS.to_string())
+                } else if body.contains("\"stream\":true") {
                     (200, "text/event-stream", CHAT_SSE.to_string())
                 } else {
                     (200, "application/json", CHAT_JSON.to_string())
@@ -456,6 +478,49 @@ fn stream_chat_emits_full_sse_sequence() {
     );
     assert!(body.contains("event: response.completed"), "body: {body}");
     assert!(!body.contains("\"status\":\"incomplete\""), "body: {body}");
+    assert!(body.contains("\"status\":\"completed\""), "body: {body}");
+}
+
+#[test]
+fn stream_reasoning_blocks_surface_text_through_proxied_sse() {
+    let mock = start_mock();
+    let proxy = boot_proxy(mock.port, None);
+    // kimi-k2 routes to the Chat family; the block-list SSE shape was
+    // captured live from Mistral's zai-glm-5-3.
+    let req = r#"{"model":"kimi-k2","stream":true,"input":[{"type":"message","role":"user","content":"ping"}]}"#;
+    let (status, body) = http(
+        &format!("http://127.0.0.1:{}/v1/responses", proxy.port),
+        "POST",
+        Some(req),
+        "",
+    )
+    .unwrap();
+    assert_eq!(status, 200, "body: {body}");
+    assert!(
+        body.contains("event: response.reasoning_text.delta"),
+        "reasoning deltas missing: {body}"
+    );
+    assert!(
+        body.contains("\"delta\":\"The user is asking\""),
+        "body: {body}"
+    );
+    assert!(
+        body.contains("event: response.output_text.delta"),
+        "body: {body}"
+    );
+    assert!(
+        body.contains("\"delta\":\"pong zai-glm-5-3\""),
+        "block text not surfaced: {body}"
+    );
+    assert!(
+        body.contains("event: response.output_item.done"),
+        "body: {body}"
+    );
+    assert!(
+        body.contains("\"type\":\"reasoning\""),
+        "reasoning item missing: {body}"
+    );
+    assert!(body.contains("event: response.completed"), "body: {body}");
     assert!(body.contains("\"status\":\"completed\""), "body: {body}");
 }
 

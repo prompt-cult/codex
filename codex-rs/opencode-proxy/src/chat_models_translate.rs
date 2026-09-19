@@ -30,11 +30,13 @@ struct ChatModelList {
 
 /// A single Chat model entry. Only the fields we map are declared; all are
 /// tolerant of omission so upstream schema drift does not hard-fail discovery.
+/// OpenCode's curated endpoints list plain `{id,…}` entries with no
+/// `capabilities` object at all; absence of the object means chat-capable.
 #[derive(Debug, Deserialize)]
 struct ChatModel {
     id: String,
     #[serde(default)]
-    capabilities: ChatCapabilities,
+    capabilities: Option<ChatCapabilities>,
     #[serde(default)]
     max_context_length: Option<i64>,
 }
@@ -78,7 +80,7 @@ pub fn translate_chat_models(
     let chat_capable: Vec<ChatModel> = list
         .data
         .into_iter()
-        .filter(|m| m.capabilities.completion_chat)
+        .filter(|m| m.capabilities.as_ref().is_none_or(|c| c.completion_chat))
         .collect();
     let chat_loaded = chat_capable.len();
 
@@ -295,5 +297,22 @@ mod tests {
         .expect("translate");
         assert!(out.response.models.is_empty());
         assert_eq!(out.chat_loaded, 0);
+    }
+
+    #[test]
+    fn opencode_plain_entries_without_capabilities_are_chat_capable() {
+        let out = translate_chat_models(
+            br#"{"object":"list","data":[
+                {"id":"glm-5.3-flash","object":"model","created":1,"owned_by":"opencode"},
+                {"id":"claude-haiku-4-5","object":"model","created":1,"owned_by":"opencode"}
+            ]}"#,
+            &no_exclusions(),
+            &no_overrides(),
+        )
+        .expect("translate");
+        assert_eq!(out.chat_loaded, 2);
+        assert_eq!(out.response.models.len(), 2);
+        let ids: Vec<&str> = out.response.models.iter().map(|m| m.slug.as_str()).collect();
+        assert_eq!(ids, ["glm-5.3-flash", "claude-haiku-4-5"]);
     }
 }

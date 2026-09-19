@@ -61,8 +61,19 @@ pub(crate) struct ChatToOaiStream {
     opened: bool,
     /// Whether the text message item has been added.
     msg_item_added: bool,
+    /// Output index assigned to the message item when it was announced; 0
+    /// unless a reasoning item already took 0.
+    msg_output_index: usize,
     /// Accumulated text for the assistant message.
     text_acc: String,
+    /// Reasoning output item id (opened by the first thinking block).
+    reasoning_id: Option<String>,
+    /// Whether the reasoning item has been announced.
+    reasoning_item_added: bool,
+    /// Output index assigned to the reasoning item when it was announced.
+    reasoning_output_index: usize,
+    /// Accumulated reasoning text for the reasoning output item.
+    reasoning_acc: String,
     /// Tool calls by Chat's streaming index.
     tool_calls: HashMap<usize, ToolCallState>,
     /// Final usage captured from the terminal chunk (if any).
@@ -111,7 +122,12 @@ impl ChatToOaiStream {
             msg_id: None,
             opened: false,
             msg_item_added: false,
+            msg_output_index: 0,
             text_acc: String::new(),
+            reasoning_id: None,
+            reasoning_item_added: false,
+            reasoning_output_index: 0,
+            reasoning_acc: String::new(),
             tool_calls: HashMap::new(),
             usage: None,
             finish_reason: None,
@@ -231,22 +247,71 @@ impl ChatToOaiStream {
             self.open_response();
         }
 
-        // Handle text deltas.
-        if let Some(text) = delta["content"].as_str()
-            && !text.is_empty()
-        {
-            self.ensure_msg_item();
-            self.text_acc.push_str(text);
-            self.emit_with_seq(
-                "response.output_text.delta",
-                json!({
-                    "type": "response.output_text.delta",
-                    "output_index": 0,
-                    "content_index": 0,
-                    "item_id": self.msg_id.clone().unwrap_or_default(),
-                    "delta": text,
-                }),
-            );
+        // Handle content deltas. Reasoning models send `content` as a list of
+        // typed blocks instead of a string, so both shapes must be handled.
+        match &delta["content"] {
+            Value::String(text) if !text.is_empty() => {
+                self.ensure_msg_item();
+                self.text_acc.push_str(text);
+                self.emit_with_seq(
+                    "response.output_text.delta",
+                    json!({
+                        "type": "response.output_text.delta",
+                        "output_index": self.msg_output_index,
+                        "content_index": 0,
+                        "item_id": self.msg_id.clone().unwrap_or_default(),
+                        "delta": text,
+                    }),
+                );
+            }
+            Value::Array(blocks) => {
+                for block in blocks {
+                    match block["type"].as_str() {
+                        Some("text") => {
+                            if let Some(text) = block["text"].as_str()
+                                && !text.is_empty()
+                            {
+                                self.ensure_msg_item();
+                                self.text_acc.push_str(text);
+                                self.emit_with_seq(
+                                    "response.output_text.delta",
+                                    json!({
+                                        "type": "response.output_text.delta",
+                                        "output_index": self.msg_output_index,
+                                        "content_index": 0,
+                                        "item_id": self.msg_id.clone().unwrap_or_default(),
+                                        "delta": text,
+                                    }),
+                                );
+                            }
+                        }
+                        Some("thinking") => {
+                            if let Some(inner) = block["thinking"].as_array() {
+                                for part in inner {
+                                    if part["type"].as_str() == Some("text")
+                                        && let Some(text) = part["text"].as_str()
+                                        && !text.is_empty()
+                                    {
+                                        self.ensure_reasoning_item();
+                                        self.reasoning_acc.push_str(text);
+                                        self.emit_with_seq(
+                                            "response.reasoning_text.delta",
+                                            json!({
+                                                "type": "response.reasoning_text.delta",
+                                                "output_index": self.reasoning_output_index,
+                                                "item_id": self.reasoning_id.clone().unwrap_or_default(),
+                                                "delta": text,
+                                            }),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
         }
 
         // Handle tool call deltas. The assistant message item (index 0) is
@@ -276,11 +341,11 @@ impl ChatToOaiStream {
         self.emit("response.in_progress", skeleton);
     }
 
-    /// Offset for tool-call `output_index` values: the assistant message item
-    /// always occupies index 0 (it is opened before any tool call is
-    /// announced), so tool calls always start at index 1.
+    /// Offset for tool-call `output_index` values: every announced item
+    /// (reasoning, then message) reserves an output index before the tool
+    /// calls, so tool calls always start at the first unclaimed index.
     fn msg_offset(&self) -> usize {
-        if self.msg_id.is_some() { 1 } else { 0 }
+        usize::from(self.reasoning_id.is_some()) + usize::from(self.msg_id.is_some())
     }
 
     fn ensure_msg_item(&mut self) {
@@ -290,11 +355,12 @@ impl ChatToOaiStream {
         self.msg_item_added = true;
         let msg_id = format!("msg_{}", Uuid::new_v4().simple());
         self.msg_id = Some(msg_id.clone());
+        self.msg_output_index = if self.reasoning_id.is_some() { 1 } else { 0 };
         self.emit_with_seq(
             "response.output_item.added",
             json!({
                 "type": "response.output_item.added",
-                "output_index": 0,
+                "output_index": self.msg_output_index,
                 "item": {
                     "id": msg_id,
                     "type": "message",
@@ -308,10 +374,33 @@ impl ChatToOaiStream {
             "response.content_part.added",
             json!({
                 "type": "response.content_part.added",
-                "output_index": 0,
+                "output_index": self.msg_output_index,
                 "content_index": 0,
                 "item_id": msg_id,
                 "part": {"type": "output_text", "text": "", "annotations": []},
+            }),
+        );
+    }
+
+    fn ensure_reasoning_item(&mut self) {
+        if self.reasoning_id.is_some() {
+            return;
+        }
+        let reasoning_id = format!("rs_{}", Uuid::new_v4().simple());
+        self.reasoning_id = Some(reasoning_id.clone());
+        self.reasoning_output_index = if self.msg_id.is_some() { 1 } else { 0 };
+        self.reasoning_item_added = true;
+        self.emit_with_seq(
+            "response.output_item.added",
+            json!({
+                "type": "response.output_item.added",
+                "output_index": self.reasoning_output_index,
+                "item": {
+                    "id": reasoning_id,
+                    "type": "reasoning",
+                    "summary": [],
+                    "content": [],
+                },
             }),
         );
     }
@@ -415,6 +504,38 @@ impl ChatToOaiStream {
     }
 
     fn handle_finish(&mut self, reason: &str) {
+        // Close the reasoning item if present. Reasoning precedes the message
+        // in the upstream stream, so its closure events come first.
+        if self.reasoning_item_added {
+            let rs_id = self.reasoning_id.clone().unwrap_or_default();
+            self.emit_with_seq(
+                "response.reasoning_text.done",
+                json!({
+                    "type": "response.reasoning_text.done",
+                    "output_index": self.reasoning_output_index,
+                    "item_id": rs_id,
+                    "text": self.reasoning_acc.clone(),
+                }),
+            );
+            self.emit_with_seq(
+                "response.output_item.done",
+                json!({
+                    "type": "response.output_item.done",
+                    "output_index": self.reasoning_output_index,
+                    "item": {
+                        "id": rs_id,
+                        "type": "reasoning",
+                        "summary": [],
+                        "content": [
+                            {"type": "reasoning_text", "text": self.reasoning_acc.clone()}
+                        ],
+                        "encrypted_content": null,
+                    },
+                }),
+            );
+            self.reasoning_item_added = false;
+        }
+
         // Close text message if present.
         if self.msg_item_added {
             let msg_id = self.msg_id.clone().unwrap_or_default();
@@ -422,7 +543,7 @@ impl ChatToOaiStream {
                 "response.output_text.done",
                 json!({
                     "type": "response.output_text.done",
-                    "output_index": 0,
+                    "output_index": self.msg_output_index,
                     "content_index": 0,
                     "item_id": msg_id,
                     "text": self.text_acc.clone(),
@@ -432,7 +553,7 @@ impl ChatToOaiStream {
                 "response.content_part.done",
                 json!({
                     "type": "response.content_part.done",
-                    "output_index": 0,
+                    "output_index": self.msg_output_index,
                     "content_index": 0,
                     "item_id": msg_id,
                     "part": {"type": "output_text", "text": self.text_acc.clone(), "annotations": []},
@@ -442,7 +563,7 @@ impl ChatToOaiStream {
                 "response.output_item.done",
                 json!({
                     "type": "response.output_item.done",
-                    "output_index": 0,
+                    "output_index": self.msg_output_index,
                     "item": {
                         "id": msg_id,
                         "type": "message",
@@ -528,9 +649,19 @@ impl ChatToOaiStream {
             None
         };
 
-        // Build output from message + tool calls.
+        // Build output from reasoning + message + tool calls.
         let text_acc = self.text_acc.clone();
+        let reasoning_acc = self.reasoning_acc.clone();
         let mut output: Vec<Value> = Vec::new();
+        if let Some(rs_id) = &self.reasoning_id {
+            output.push(json!({
+                "id": rs_id,
+                "type": "reasoning",
+                "summary": [],
+                "content": [{"type": "reasoning_text", "text": reasoning_acc}],
+                "encrypted_content": null,
+            }));
+        }
         if let Some(msg_id) = &self.msg_id {
             output.push(json!({
                 "id": msg_id,
@@ -774,5 +905,142 @@ mod tests {
             .map(|(_, d)| d)
             .expect("tool call added");
         assert_eq!(tool_added["output_index"], json!(1));
+    }
+
+    #[test]
+    fn thinking_deltas_then_mixed_final_delta_surface_reasoning_and_text() {
+        let mut t = stream("m");
+        t.process_line(&data_line(
+            r#"{"choices":[{"delta":{"role":"assistant","content":[{"type":"thinking","thinking":[{"type":"text","text":"The"}],"closed":true}]}}]}"#,
+        ));
+        t.process_line(&data_line(
+            r#"{"choices":[{"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":" user is asking"}],"closed":true}]}}]}"#,
+        ));
+        let mixed_final = json!({
+            "choices": [{
+                "delta": {
+                    "content": [
+                        {"type": "thinking", "thinking": [{"type": "text", "text": "…"}], "closed": true},
+                        {"type": "text", "text": "pong zai-glm-5-3"}
+                    ]
+                }
+            }]
+        });
+        t.process_line(&data_line(&mixed_final.to_string()));
+        t.process_line(&data_line(
+            r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        ));
+        t.process_line(&data_line("[DONE]"));
+
+        let events = drain_events(&mut t);
+
+        let reasoning_deltas: Vec<&Value> = events
+            .iter()
+            .filter(|(et, _)| et == "response.reasoning_text.delta")
+            .map(|(_, d)| d)
+            .collect();
+        assert_eq!(reasoning_deltas.len(), 3);
+        let deltas: Vec<&str> = reasoning_deltas
+            .iter()
+            .map(|d| d["delta"].as_str().unwrap_or_default())
+            .collect();
+        assert_eq!(deltas, vec!["The", " user is asking", "…"]);
+        assert!(
+            reasoning_deltas
+                .iter()
+                .all(|d| d["output_index"] == json!(0))
+        );
+
+        let reasoning_added = events
+            .iter()
+            .find(|(et, d)| et == "response.output_item.added" && d["item"]["type"] == "reasoning")
+            .map(|(_, d)| d)
+            .expect("reasoning item added");
+        assert_eq!(reasoning_added["output_index"], json!(0));
+
+        let text_deltas: Vec<&Value> = events
+            .iter()
+            .filter(|(et, _)| et == "response.output_text.delta")
+            .map(|(_, d)| d)
+            .collect();
+        assert_eq!(text_deltas.len(), 1);
+        assert_eq!(text_deltas[0]["delta"], json!("pong zai-glm-5-3"));
+        assert_eq!(text_deltas[0]["output_index"], json!(1));
+
+        let msg_added = events
+            .iter()
+            .find(|(et, d)| et == "response.output_item.added" && d["item"]["type"] == "message")
+            .map(|(_, d)| d)
+            .expect("message item added");
+        assert_eq!(msg_added["output_index"], json!(1));
+
+        let done_items: Vec<&Value> = events
+            .iter()
+            .filter(|(et, _)| et == "response.output_item.done")
+            .map(|(_, d)| &d["item"])
+            .collect();
+        assert_eq!(done_items.len(), 2);
+        assert_eq!(done_items[0]["type"], json!("reasoning"));
+        assert_eq!(
+            done_items[0]["content"],
+            json!([{"type": "reasoning_text", "text": "The user is asking…"}])
+        );
+        assert_eq!(done_items[1]["type"], json!("message"));
+        assert_eq!(
+            done_items[1]["content"][0]["text"],
+            json!("pong zai-glm-5-3")
+        );
+
+        let completed = events
+            .iter()
+            .find(|(et, _)| et == "response.completed")
+            .map(|(_, d)| d)
+            .expect("completed event");
+        let output = completed["response"]["output"].as_array().expect("output");
+        assert_eq!(output.len(), 2);
+        assert_eq!(output[0]["type"], json!("reasoning"));
+        assert_eq!(
+            output[0]["content"],
+            json!([{"type": "reasoning_text", "text": "The user is asking…"}])
+        );
+        assert_eq!(output[1]["type"], json!("message"));
+        assert_eq!(output[1]["content"][0]["text"], json!("pong zai-glm-5-3"));
+        assert_eq!(completed["response"]["status"], json!("completed"));
+    }
+
+    #[test]
+    fn unknown_block_types_in_stream_content_are_ignored() {
+        let mut t = stream("m");
+        t.process_line(&data_line(
+            r#"{"choices":[{"delta":{"content":[{"type":"image","url":"https://example.test/x.png"},{"type":"text","text":"hi"}]}}]}"#,
+        ));
+        t.process_line(&data_line(
+            r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        ));
+        t.process_line(&data_line("[DONE]"));
+
+        let events = drain_events(&mut t);
+
+        assert!(
+            !events
+                .iter()
+                .any(|(et, _)| et == "response.reasoning_text.delta")
+        );
+        let text_deltas: Vec<&Value> = events
+            .iter()
+            .filter(|(et, _)| et == "response.output_text.delta")
+            .map(|(_, d)| d)
+            .collect();
+        assert_eq!(text_deltas.len(), 1);
+        assert_eq!(text_deltas[0]["delta"], json!("hi"));
+        assert_eq!(text_deltas[0]["output_index"], json!(0));
+        let completed = events
+            .iter()
+            .find(|(et, _)| et == "response.completed")
+            .map(|(_, d)| d)
+            .expect("completed");
+        let output = completed["response"]["output"].as_array().expect("output");
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0]["type"], json!("message"));
     }
 }
