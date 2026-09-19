@@ -38,7 +38,7 @@ if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
 fi
 rm -f "$pid_file" "$info_file" "$log_file"
 
-printf '%s' "$key" | nohup "$bin" "$proxy-proxy" \
+printf '%s' "$key" | nohup "$bin" \
   --port "$port" --http-shutdown --server-info "$info_file" \
   >"$log_file" 2>&1 &
 echo $! >"$pid_file"

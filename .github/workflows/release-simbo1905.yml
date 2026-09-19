@@ -6,81 +6,82 @@ on:
 
 jobs:
   test:
-    name: Run Tests
+    name: test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Run cargo test
-        run: cargo test -p codex-core -p codex-tui -p codex-zen-proxy
+      - name: cargo test
+        run: cargo test
 
   build:
     needs: test
-    name: Build - ${{ matrix.target }}
+    name: build-${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
-            asset_name: codex-macos-arm64
+            platform: darwin-arm64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            platform: darwin-x64
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            asset_name: codex-linux-x64
-
+            platform: linux-x64
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            platform: linux-arm64
+    env:
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+      CC_aarch64_unknown_linux_musl: aarch64-linux-gnu-gcc
+      AR_aarch64_unknown_linux_musl: aarch64-linux-gnu-ar
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      
-      - if: matrix.os == 'ubuntu-latest'
-        name: Install musl-tools
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-
-      - name: Build release
-        run: cargo build --release --target ${{ matrix.target }} --bin codex --bin codex-zen-proxy
-        working-directory: .
-
-      - name: Prepare assets
+      - if: runner.os == 'Linux'
+        name: Install cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+          sudo ln -sf /usr/bin/musl-gcc /usr/bin/x86_64-linux-musl-gcc || true
+      - name: Build proxies
+        run: cargo build --release --target ${{ matrix.target }} --bin codex-mistral-proxy --bin codex-zen-proxy
+      - name: Package
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/codex dist/${{ matrix.asset_name }}
-          cp target/${{ matrix.target }}/release/codex-zen-proxy dist/codex-zen-proxy-${{ matrix.asset_name }}
-          cd dist
-          tar -czf ../${{ matrix.asset_name }}.tar.gz *
-      
+          cp target/${{ matrix.target }}/release/codex-mistral-proxy dist/codex-mistral-proxy-${{ matrix.platform }}
+          cp target/${{ matrix.target }}/release/codex-zen-proxy dist/codex-zen-proxy-${{ matrix.platform }}
+          tar -czf codex-proxies-${{ matrix.platform }}.tar.gz -C dist .
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}.tar.gz
+          name: proxies-${{ matrix.platform }}
+          path: codex-proxies-${{ matrix.platform }}.tar.gz
 
   release:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      
-      - name: Generate lineage report
-        run: ./scripts/generate-lineage.sh
-
-      - name: Flatten artifacts
-        run: |
-          mkdir -p dist
-          find artifacts -name "*.tar.gz" -exec cp {} dist/ \;
-          # Attach custom README files and lineage report
-          find . -maxdepth 1 -name "README.*.md" -exec cp {} dist/ \;
-      
+      - name: Collect assets
+        run: find artifacts -name "*.tar.gz" -exec mv {} . \;
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
-          generate_release_notes: true
           tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: 'Just the secure translating proxies: codex-mistral-proxy and codex-zen-proxy.'
+          generate_release_notes: false
+          files: codex-proxies-*.tar.gz

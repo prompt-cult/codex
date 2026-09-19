@@ -1,5 +1,5 @@
 # Process wrapper for side-by-side testing of the translating proxies
-# (stable `zen-proxy` reference vs experimental uncommitted `mistral-proxy`).
+# (`codex-zen-proxy` stable reference vs `codex-mistral-proxy`).
 #
 # The proxies never exit, so every `boot-*` target backgrounds the process,
 # records its pid/server-info/log under .tmp/proxy-test/, and waits (max 30s)
@@ -12,20 +12,20 @@
 #   make smoke                    # health + models + non-stream + stream on both
 #   make stop-all
 #
-# BIN points at a version-pinned copy of the release `codex` binary so that
-# concurrent source-tree changes cannot affect a running test series.
+# The workspace is slimmed to the proxy crates only; each proxy is its own
+# standalone binary (no `codex` multitool subcommand anymore).
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-BIN      ?= .proxy-test-bins/$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)/codex
+BIN_ZEN     ?= codex-rs/target/release/codex-zen-proxy
+BIN_MISTRAL ?= codex-rs/target/release/codex-mistral-proxy
+
 ENV_FILE ?= .env
 RUN_DIR  ?= .tmp/proxy-test
 
 ZEN_MODEL     ?= gpt-5.6-luna
 MISTRAL_MODEL ?= mistral-medium-latest
-
-CURL := curl -fsS --max-time 30
 
 .PHONY: port boot-zen boot-mistral smoke smoke-zen smoke-mistral stop-all clean help
 
@@ -37,11 +37,11 @@ port:
 
 boot-zen:
 	@KEY_ENV=OPENCODE_API_KEY PROXY=zen MODEL='$(ZEN_MODEL)' \
-		./scripts/boot-proxy.sh '$(BIN)' '$(ENV_FILE)' '$(RUN_DIR)'
+		./scripts/boot-proxy.sh '$(BIN_ZEN)' '$(ENV_FILE)' '$(RUN_DIR)'
 
 boot-mistral:
 	@KEY_ENV=MISTRAL_API_KEY PROXY=mistral MODEL='$(MISTRAL_MODEL)' \
-		./scripts/boot-proxy.sh '$(BIN)' '$(ENV_FILE)' '$(RUN_DIR)'
+		./scripts/boot-proxy.sh '$(BIN_MISTRAL)' '$(ENV_FILE)' '$(RUN_DIR)'
 
 smoke: smoke-zen smoke-mistral
 
