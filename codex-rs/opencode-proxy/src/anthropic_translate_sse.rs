@@ -69,10 +69,16 @@ pub(crate) struct AnthropicToOaiStream {
     done: bool,
     /// Residual bytes from the last upstream read (partial SSE line).
     line_buf: Vec<u8>,
+    /// Log prefix, matching the running proxy kind (zen or go).
+    log_prefix: &'static str,
 }
 
 impl AnthropicToOaiStream {
-    pub(crate) fn new(model: String, upstream: reqwest::blocking::Response) -> Self {
+    pub(crate) fn new(
+        model: String,
+        upstream: reqwest::blocking::Response,
+        log_prefix: &'static str,
+    ) -> Self {
         let resp_id = format!("resp_{}", Uuid::new_v4().simple());
         let created_at = time::SystemTime::now()
             .duration_since(time::UNIX_EPOCH)
@@ -88,6 +94,7 @@ impl AnthropicToOaiStream {
             upstream,
             done: false,
             line_buf: Vec::new(),
+            log_prefix,
         }
     }
 }
@@ -162,7 +169,10 @@ impl AnthropicToOaiStream {
         let ev: Value = match serde_json::from_str(payload) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("zen-proxy: non-JSON anthropic SSE: {e} — {payload}");
+                eprintln!(
+                    "{}: non-JSON anthropic SSE: {e} — {payload}",
+                    self.log_prefix
+                );
                 return;
             }
         };
@@ -186,7 +196,10 @@ impl AnthropicToOaiStream {
             }
             Some("message_stop") => self.on_message_stop(&ev),
             Some("ping") => {} // silently ignored
-            Some(other) => eprintln!("zen-proxy: unhandled anthropic event type: {other}"),
+            Some(other) => eprintln!(
+                "{}: unhandled anthropic event type: {other}",
+                self.log_prefix
+            ),
             None => {}
         }
     }
@@ -274,7 +287,7 @@ impl AnthropicToOaiStream {
                     }),
                 );
             }
-            other => eprintln!("zen-proxy: unknown content_block type: {other}"),
+            other => eprintln!("{}: unknown content_block type: {other}", self.log_prefix),
         }
     }
 
@@ -320,7 +333,10 @@ impl AnthropicToOaiStream {
                     }),
                 );
             }
-            other => eprintln!("zen-proxy: unknown content_block_delta type: {other}"),
+            other => eprintln!(
+                "{}: unknown content_block_delta type: {other}",
+                self.log_prefix
+            ),
         }
     }
 

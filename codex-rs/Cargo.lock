@@ -203,6 +203,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-opencode-proxy"
+version = "0.121.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "codex-process-hardening",
+ "codex-proxy-protocol",
+ "codex-utils-home-dir",
+ "ctor",
+ "globset",
+ "libc",
+ "pretty_assertions",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tiny_http",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "codex-process-hardening"
 version = "0.121.0"
 dependencies = [
@@ -243,24 +264,6 @@ dependencies = [
  "dirs",
  "pretty_assertions",
  "tempfile",
-]
-
-[[package]]
-name = "codex-zen-proxy"
-version = "0.121.0"
-dependencies = [
- "anyhow",
- "clap",
- "codex-process-hardening",
- "ctor",
- "libc",
- "pretty_assertions",
- "reqwest",
- "serde",
- "serde_json",
- "tiny_http",
- "uuid",
- "zeroize",
 ]
 
 [[package]]

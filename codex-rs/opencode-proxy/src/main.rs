@@ -1,5 +1,5 @@
 use clap::Parser;
-use codex_zen_proxy::Args;
+use codex_opencode_proxy::Args;
 
 #[ctor::ctor]
 fn pre_main() {
@@ -8,5 +8,5 @@ fn pre_main() {
 
 pub fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    codex_zen_proxy::run_main(args)
+    codex_opencode_proxy::run_main(args)
 }

@@ -1,15 +1,15 @@
 [package]
-name = "codex-zen-proxy"
+name = "codex-opencode-proxy"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "codex-zen-proxy"
+name = "codex-opencode-proxy"
 path = "src/main.rs"
 
 [lib]
-name = "codex_zen_proxy"
+name = "codex_opencode_proxy"
 path = "src/lib.rs"
 
 [lints]
@@ -19,7 +19,10 @@ workspace = true
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 codex-process-hardening = { workspace = true }
+codex-proxy-protocol = { workspace = true }
+codex-utils-home-dir = { workspace = true }
 ctor = { workspace = true }
+globset = { workspace = true }
 libc = { workspace = true }
 reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
 serde = { workspace = true, features = ["derive"] }

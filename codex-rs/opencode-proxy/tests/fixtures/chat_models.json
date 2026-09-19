@@ -1,0 +1,29 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "zai-glm-5-2",
+      "object": "model",
+      "capabilities": {
+        "completion_chat": true,
+        "function_calling": true
+      },
+      "max_context_length": 131072
+    },
+    {
+      "id": "chat-medium-latest",
+      "object": "model",
+      "capabilities": {
+        "completion_chat": true
+      }
+    },
+    {
+      "id": "chat-embed",
+      "object": "model",
+      "capabilities": {
+        "completion_chat": false
+      },
+      "max_context_length": 8192
+    }
+  ]
+}

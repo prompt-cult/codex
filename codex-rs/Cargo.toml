@@ -4,7 +4,7 @@
 # broken-mistral-introspection-pre-slimdown for the pre-slim state.
 members = [
     "mistral-proxy",
-    "zen-proxy",
+    "opencode-proxy",
     "process-hardening",
     "proxy-protocol",
     "utils/absolute-path",
@@ -25,7 +25,7 @@ license = "Apache-2.0"
 codex-mistral-proxy = { path = "mistral-proxy" }
 codex-process-hardening = { path = "process-hardening" }
 codex-proxy-protocol = { path = "proxy-protocol" }
-codex-zen-proxy = { path = "zen-proxy" }
+codex-opencode-proxy = { path = "opencode-proxy" }
 codex-utils-absolute-path = { path = "utils/absolute-path" }
 codex-utils-home-dir = { path = "utils/home-dir" }
 
