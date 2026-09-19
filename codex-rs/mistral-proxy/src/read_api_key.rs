@@ -1,8 +1,9 @@
 //! API key reading, mirroring `codex-zen-proxy`'s security model. The key is
-//! taken from the `MISTRAL_API_KEY` environment variable when present (loaded
-//! from `.env` by the CLI's dotenvy setup), falling back to stdin via a
-//! low-level `read(2)` on Unix to avoid stdio's BufReader retaining a copy in
-//! memory. The leaked `&'static str` is protected with `mlock(2)`.
+//! taken from the `MISTRAL_API_KEY` environment variable when present (the
+//! standalone binary performs no `.env` loading — export it or pipe it),
+//! falling back to stdin via a low-level `read(2)` on Unix to avoid stdio's
+//! BufReader retaining a copy in memory. The leaked `&'static str` is
+//! protected with `mlock(2)`.
 
 use anyhow::Context;
 use anyhow::Result;
@@ -14,7 +15,7 @@ const AUTH_HEADER_PREFIX: &[u8] = b"Bearer ";
 const MISTRAL_API_KEY_ENV: &str = "MISTRAL_API_KEY";
 
 /// Reads the auth token, preferring the `MISTRAL_API_KEY` environment variable
-/// (populated from `.env` by dotenvy) and falling back to stdin. Returns a
+/// (set in the environment by the caller) and falling back to stdin. Returns a
 /// static `Authorization` header value with the token used with `Bearer`, whose
 /// bytes are locked in memory to avoid accidental exposure.
 pub(crate) fn read_auth_header() -> Result<&'static str> {

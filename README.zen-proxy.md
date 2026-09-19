@@ -1,24 +1,24 @@
-# harness-zen-proxy(1)
+# codex-zen-proxy(1)
 
 ## NAME
 
-`harness-zen-proxy` — translating API proxy for OpenCode Zen
+`codex-zen-proxy` — translating API proxy for OpenCode Zen
 
 ## SYNOPSIS
 
 ```
-printenv OPENCODE_API_KEY | harness zen-proxy [--port PORT] [--upstream-base URL] [--server-info FILE] [--http-shutdown]
+printenv OPENCODE_API_KEY | codex-zen-proxy [--port PORT] [--upstream-base URL] [--server-info FILE] [--http-shutdown]
 ```
 
 ## DESCRIPTION
 
-`harness-zen-proxy` is a sidecar process that sits between `harness` and the
-OpenCode Zen API.  It accepts the OpenAI Responses wire API (which `harness`
-always speaks) and routes each request to the correct Zen endpoint based on
-model family:
+`codex-zen-proxy` is a sidecar process that sits between a harness and the
+OpenCode Zen API.  It accepts the OpenAI Responses wire API (which the
+harness speaks via `api_style = "openai-responses"`) and routes each request
+to the correct Zen endpoint based on model family:
 
 ```
-harness  ──POST /v1/responses──▶  harness-zen-proxy (127.0.0.1:9099)
+harness  ──POST /v1/responses──▶  codex-zen-proxy (127.0.0.1:9099)
                                         │
                           ┌─────────────┴──────────────┐
                     gpt-* │                             │ claude-*
@@ -52,14 +52,12 @@ disk or passed through environment variables.
 ## ENDPOINTS SERVED
 
 `POST /v1/responses`
-: The only request path `harness` ever sends.  All other paths return 403.
+: The only request path the harness ever sends.  All other paths return 403.
 
 `GET /health`
-: Returns `{"status":"ok","proxy":"harness-zen-proxy","upstream":"..."}`.
+: Returns `{"status":"ok","proxy":"proxy-opencode-zen","upstream":"..."}`.
 
 ## SECURITY
-
-The proxy inherits the privilege-separation model from `harness-responses-api-proxy`:
 
 - Key is read via raw `read(2)` to avoid `BufReader` retaining a copy.
 - The stack buffer holding the raw bytes is zeroized immediately after use.
@@ -69,46 +67,42 @@ The proxy inherits the privilege-separation model from `harness-responses-api-pr
 
 ## CONFIGURATION
 
-`~/.harness/config.toml`:
+The harness carries no key.  In `~/.vibe/config.toml` (or a project
+`.vibe/config.toml`) point a provider at the loopback proxy and leave the
+key env var empty:
 
 ```toml
-model = "gpt-5.4"            # or any claude-* model
-model_provider = "zen"
+[[providers]]
+name = "zen-proxy"
+api_base = "http://127.0.0.1:9099/v1"
+api_key_env_var = ""          # the proxy holds the key; the harness must not
+api_style = "openai-responses"
+backend = "generic"
 
-[model_providers.zen]
-name     = "Zen"
-base_url = "http://127.0.0.1:9099/v1"
-wire_api = "responses"
+[[models]]
+name = "gpt-5.4"              # or any claude-* model
+provider = "zen-proxy"
+alias = "gpt-5.4-secure"
 ```
 
-**Do not set `env_key` here.**  The proxy holds the API key in locked memory
-and injects it into every upstream request.  `harness` itself must have no
-knowledge of the key — that is the entire point of the privilege-separation
-model.  Setting `env_key` would cause harness to demand the secret in its own
-environment, defeating the security design.
-
-The `model_catalog_json` key can point at a local JSON file listing available
-models so the TUI model-picker is populated without a live `/v1/models` call.
+**Do not set `api_key_env_var` here.**  The proxy holds the API key in
+locked memory and injects it into every upstream request.  The harness
+itself must have no knowledge of the key — that is the entire point of the
+privilege-separation model.  Setting an env var would cause the harness to
+demand the secret in its own environment, defeating the security design.
 
 ## USAGE
 
 ```bash
 # start the proxy (stays in foreground; use a second terminal or background it)
-printenv OPENCODE_API_KEY | ./harness-rs/target/debug/harness zen-proxy --port 9099 &
+printenv OPENCODE_API_KEY | ./codex-rs/target/debug/codex-zen-proxy --port 9099 &
 
 # or with the installed binary
-printenv OPENCODE_API_KEY | harness zen-proxy --port 9099 &
+printenv OPENCODE_API_KEY | codex-zen-proxy --port 9099 &
 
-# then run harness as normal
-harness
+# then run the harness as normal
 ```
 
 ## CRATE
 
-`harness-rs/zen-proxy` — standalone binary `harness-zen-proxy`, also registered
-as the hidden subcommand `harness zen-proxy`.
-
-## SEE ALSO
-
-`harness-responses-api-proxy(1)` — the upstream security-only passthrough proxy
-this crate was derived from.
+`codex-rs/zen-proxy` — standalone binary `codex-zen-proxy`.
