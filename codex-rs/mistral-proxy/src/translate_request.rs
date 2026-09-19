@@ -142,7 +142,6 @@ pub(crate) fn mistral_response_to_oai(mistral: &Value, model: &str) -> Value {
                     "type": "reasoning",
                     "summary": [],
                     "content": [{"type": "reasoning_text", "text": reasoning_parts.concat()}],
-                    "encrypted_content": null,
                 }));
             }
 
@@ -536,7 +535,7 @@ mod tests {
             json!([{"type": "reasoning_text", "text": "The user is asking"}])
         );
         assert_eq!(output[0]["summary"], json!([]));
-        assert_eq!(output[0]["encrypted_content"], Value::Null);
+        assert!(output[0].get("encrypted_content").is_none());
         assert_eq!(output[1]["type"], "message");
         assert_eq!(
             output[1]["content"],

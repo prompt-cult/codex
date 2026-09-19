@@ -312,7 +312,12 @@ mod tests {
         .expect("translate");
         assert_eq!(out.chat_loaded, 2);
         assert_eq!(out.response.models.len(), 2);
-        let ids: Vec<&str> = out.response.models.iter().map(|m| m.slug.as_str()).collect();
+        let ids: Vec<&str> = out
+            .response
+            .models
+            .iter()
+            .map(|m| m.slug.as_str())
+            .collect();
         assert_eq!(ids, ["glm-5.3-flash", "claude-haiku-4-5"]);
     }
 }

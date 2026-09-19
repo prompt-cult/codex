@@ -523,7 +523,6 @@ impl MistralToOaiStream {
                         "content": [
                             {"type": "reasoning_text", "text": self.reasoning_acc.clone()}
                         ],
-                        "encrypted_content": null,
                     },
                 }),
             );
@@ -653,7 +652,6 @@ impl MistralToOaiStream {
                 "type": "reasoning",
                 "summary": [],
                 "content": [{"type": "reasoning_text", "text": reasoning_acc}],
-                "encrypted_content": null,
             }));
         }
         if let Some(msg_id) = &self.msg_id {
