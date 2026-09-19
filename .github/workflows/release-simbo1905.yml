@@ -50,8 +50,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Add cross target to pinned toolchain
-        run: rustup target add ${{ matrix.target }}
-        working-directory: .
+        run: rustup target add ${{ matrix.target }} --toolchain 1.93.0
       - if: runner.os == 'Linux'
         name: Install cross toolchain
         run: |
