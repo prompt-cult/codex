@@ -6,14 +6,14 @@
 
 use anyhow::Context;
 use anyhow::Result;
-use codex_protocol::config_types::ReasoningSummary;
-use codex_protocol::openai_models::ConfigShellToolType;
-use codex_protocol::openai_models::ModelInfo;
-use codex_protocol::openai_models::ModelVisibility;
-use codex_protocol::openai_models::ModelsResponse;
-use codex_protocol::openai_models::TruncationPolicyConfig;
-use codex_protocol::openai_models::WebSearchToolType;
-use codex_protocol::openai_models::default_input_modalities;
+use codex_proxy_protocol::models::ConfigShellToolType;
+use codex_proxy_protocol::models::ModelInfo;
+use codex_proxy_protocol::models::ModelVisibility;
+use codex_proxy_protocol::models::ModelsResponse;
+use codex_proxy_protocol::models::ReasoningSummary;
+use codex_proxy_protocol::models::TruncationPolicyConfig;
+use codex_proxy_protocol::models::WebSearchToolType;
+use codex_proxy_protocol::models::default_input_modalities;
 use serde::Deserialize;
 
 /// Fallback context window used when Mistral omits `max_context_length`.

@@ -14,6 +14,8 @@ use globset::GlobSet;
 use globset::GlobSetBuilder;
 use serde::Deserialize;
 
+pub mod models;
+
 /// Unique, stable identifier for each provider proxy. The string form is the
 /// config filename stem and the log-line prefix; it must never change once a
 /// proxy ships, or existing user configs silently stop loading.

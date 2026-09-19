@@ -1,5 +1,4 @@
 use dirs::home_dir;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -8,7 +7,6 @@ use std::cell::RefCell;
 use std::path::Display;
 use std::path::Path;
 use std::path::PathBuf;
-use ts_rs::TS;
 
 mod absolutize;
 
@@ -19,7 +17,7 @@ mod absolutize;
 /// using [AbsolutePathBufGuard::new]. If no base path is set, the
 /// deserialization will fail unless the path being deserialized is already
 /// absolute.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, JsonSchema, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct AbsolutePathBuf(PathBuf);
 
 impl AbsolutePathBuf {

@@ -6,19 +6,9 @@ members = [
     "mistral-proxy",
     "zen-proxy",
     "process-hardening",
-    "protocol",
     "proxy-protocol",
-    "async-utils",
-    "execpolicy",
-    "git-utils",
-    "network-proxy",
     "utils/absolute-path",
-    "utils/cache",
     "utils/home-dir",
-    "utils/image",
-    "utils/rustls-provider",
-    "utils/string",
-    "utils/template",
 ]
 resolver = "2"
 
@@ -32,22 +22,12 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 # Internal
-codex-async-utils = { path = "async-utils" }
-codex-execpolicy = { path = "execpolicy" }
-codex-git-utils = { path = "git-utils" }
 codex-mistral-proxy = { path = "mistral-proxy" }
-codex-network-proxy = { path = "network-proxy" }
 codex-process-hardening = { path = "process-hardening" }
-codex-protocol = { path = "protocol" }
 codex-proxy-protocol = { path = "proxy-protocol" }
 codex-zen-proxy = { path = "zen-proxy" }
 codex-utils-absolute-path = { path = "utils/absolute-path" }
-codex-utils-cache = { path = "utils/cache" }
 codex-utils-home-dir = { path = "utils/home-dir" }
-codex-utils-image = { path = "utils/image" }
-codex-utils-rustls-provider = { path = "utils/rustls-provider" }
-codex-utils-string = { path = "utils/string" }
-codex-utils-template = { path = "utils/template" }
 
 # External
 age = "0.11.1"
@@ -136,7 +116,7 @@ ratatui = "0.29.0"
 ratatui-macros = "0.6.0"
 regex = "1.12.3"
 regex-lite = "0.1.8"
-reqwest = "0.12"
+reqwest = { version = "0.12", default-features = false }
 rmcp = { version = "0.15.0", default-features = false }
 runfiles = { git = "https://github.com/dzbarsky/rules_rust", rev = "b56cbaa8465e74127f1ea216f813cd377295ad81" }
 rustls = { version = "0.23", default-features = false, features = [

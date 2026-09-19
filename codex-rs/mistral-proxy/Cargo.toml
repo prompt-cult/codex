@@ -19,7 +19,6 @@ workspace = true
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 codex-process-hardening = { workspace = true }
-codex-protocol = { workspace = true }
 codex-proxy-protocol = { workspace = true }
 codex-utils-home-dir = { workspace = true }
 ctor = { workspace = true }
