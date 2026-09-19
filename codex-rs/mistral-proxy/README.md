@@ -1,11 +1,11 @@
-# codex-mistral-proxy
+# harness-mistral-proxy
 
 Proxy ID: `proxy-mistral-ai`. Implements the
 [Prompt Cult Proxy Protocol](../docs/proxy-protocol.md) — read that first; it
 is the binding contract for this and every future proxy.
 
-A standalone translating proxy that lets codex talk to the Mistral AI API. It
-speaks the OpenAI Responses API on the loopback side (what codex expects) and
+A standalone translating proxy that lets harness talk to the Mistral AI API. It
+speaks the OpenAI Responses API on the loopback side (what harness expects) and
 the Mistral Chat Completions API upstream. The API key is read from the
 `MISTRAL_API_KEY` environment variable (falling back to stdin) into
 `mlock(2)`-protected memory and injected into upstream requests; the proxy is
@@ -18,21 +18,21 @@ exposes now or in the future works automatically.
 
 ```shell
 # key from the environment (dotenvy in the CLI already loads .env):
-codex mistral-proxy --port 8901
+harness mistral-proxy --port 8901
 # or piped explicitly:
 grep '^MISTRAL_API_KEY=' /path/to/.env | cut -d= -f2 \
-  | codex mistral-proxy --port 8901
+  | harness mistral-proxy --port 8901
 ```
 
 ## HTTP contract
 
-The proxy exposes exactly the surface codex needs:
+The proxy exposes exactly the surface harness needs:
 
 - `POST /v1/responses` — OpenAI Responses request, translated to
   `{upstream}/chat/completions` and streamed back as Responses SSE.
-- `GET /v1/models` — model discovery. **Codex always appends a query string**
+- `GET /v1/models` — model discovery. **harness always appends a query string**
   (`?client_version=X`), so the route match must ignore the query. The response
-  is the codex `ModelsResponse` shape (`{"models":[…]}`), translated from
+  is the harness `ModelsResponse` shape (`{"models":[…]}`), translated from
   Mistral's raw `{"object":"list","data":[…]}`. Only chat-capable models
   (`capabilities.completion_chat == true`) are returned, minus any model whose
   ID matches an exclude glob (see below).
@@ -41,8 +41,8 @@ The proxy exposes exactly the surface codex needs:
 
 ## Proxy config (`proxy-mistral-ai.jsonc`)
 
-The proxy reads `$CODEX_CONFIG_DIR/proxy-mistral-ai.jsonc` (default
-`~/.codex/proxy-mistral-ai.jsonc`). The file is optional; without it the
+The proxy reads `$HARNESS_CONFIG_DIR/proxy-mistral-ai.jsonc` (default
+`~/.harness/proxy-mistral-ai.jsonc`). The file is optional; without it the
 defaults below apply. A malformed file is a startup error, never silently
 ignored. Startup always logs whether the file was found.
 
@@ -100,13 +100,13 @@ provider points at a loopback proxy. Two rules keep this working:
 ## Isolated config
 
 Point a frozen config directory at the proxy without disturbing the default
-`~/.codex` install:
+`~/.harness` install:
 
 ```shell
-CODEX_CONFIG_DIR=$HOME/.codex-mistral codex
+HARNESS_CONFIG_DIR=$HOME/.harness-mistral harness
 ```
 
-`~/.codex-mistral/config.toml` defines a provider with
+`~/.harness-mistral/config.toml` defines a provider with
 `base_url = "http://127.0.0.1:8901/v1"` and no `model_catalog`. When the proxy
 is reachable, the model picker lists Mistral's live models. When the proxy is
 unreachable, the app surfaces a fetch error and shows no remote models — it
