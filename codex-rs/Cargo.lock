@@ -245,6 +245,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-router"
+version = "0.121.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "codex-process-hardening",
+ "ctor",
+ "pretty_assertions",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tiny_http",
+]
+
+[[package]]
 name = "codex-utils-absolute-path"
 version = "0.121.0"
 dependencies = [

@@ -36,10 +36,6 @@ fn auth_header_from_key(key: &str) -> Result<&'static str> {
     Ok(leaked)
 }
 
-/// Reads the auth token from stdin and returns a static `Authorization` header
-/// value with the auth token used with `Bearer`. The header value is returned
-/// as a `&'static str` whose bytes are locked in memory to avoid accidental
-/// exposure.
 #[cfg(unix)]
 pub(crate) fn read_auth_header_from_stdin() -> Result<&'static str> {
     read_auth_header_with(read_from_unix_stdin)
@@ -135,7 +131,7 @@ where
     if total == AUTH_HEADER_PREFIX.len() {
         buf.zeroize();
         return Err(anyhow!(
-            "API key must be provided via stdin (e.g. printenv OPENCODE_API_KEY | codex-opencode-proxy)"
+            "API key must be provided via the OPENCODE_API_KEY environment variable or via stdin"
         ));
     }
 

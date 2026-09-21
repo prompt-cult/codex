@@ -5,6 +5,7 @@
 members = [
     "mistral-proxy",
     "opencode-proxy",
+    "codex-router",
     "process-hardening",
     "proxy-protocol",
     "utils/absolute-path",

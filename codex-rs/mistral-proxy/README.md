@@ -12,7 +12,10 @@ Mistral Chat Completions API upstream. The API key is read from the
 `MISTRAL_API_KEY` environment variable (falling back to stdin) into
 `mlock(2)`-protected memory and injected into upstream requests; the proxy
 is never auto-spawned by the harness — you boot it yourself, e.g. as a
-Docker sidecar.
+Docker sidecar. It can also be booted for you by `codex-proxy-router`
+(see `README.proxy-router.md` at the repo root), which boots it as a child
+with only allow-listed environment variable names in its environment; the
+dispatcher never sees the secret.
 
 Mistral-only by design: there is no model-family routing, so any model Mistral
 exposes now or in the future works automatically.

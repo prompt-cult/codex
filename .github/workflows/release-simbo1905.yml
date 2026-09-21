@@ -58,13 +58,15 @@ jobs:
           sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
           sudo ln -sf /usr/bin/musl-gcc /usr/bin/x86_64-linux-musl-gcc || true
       - name: Build proxies
-        run: cargo build --release --target ${{ matrix.target }} --bin codex-mistral-proxy --bin codex-opencode-proxy
+        working-directory: codex-rs
+        run: cargo build --release --target ${{ matrix.target }} --bin codex-mistral-proxy --bin codex-opencode-proxy --bin codex-proxy-router
       - name: Package
         working-directory: .
         run: |
           mkdir -p dist
-          cp codex-rs/target/${{ matrix.target }}/release/codex-mistral-proxy dist/codex-mistral-proxy-${{ matrix.platform }}
-          cp codex-rs/target/${{ matrix.target }}/release/codex-opencode-proxy dist/codex-opencode-proxy-${{ matrix.platform }}
+          cp codex-rs/target/${{ matrix.target }}/release/codex-mistral-proxy dist/codex-mistral-proxy
+          cp codex-rs/target/${{ matrix.target }}/release/codex-opencode-proxy dist/codex-opencode-proxy
+          cp codex-rs/target/${{ matrix.target }}/release/codex-proxy-router dist/codex-proxy-router
           tar -czf codex-proxies-${{ matrix.platform }}.tar.gz -C dist .
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -89,6 +91,6 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          body: 'Just the secure translating proxies: codex-mistral-proxy and codex-opencode-proxy.'
+          body: 'Just the secure translating proxies: codex-mistral-proxy and codex-opencode-proxy, plus the codex-proxy-router routing front end.'
           generate_release_notes: false
           files: codex-proxies-*.tar.gz
