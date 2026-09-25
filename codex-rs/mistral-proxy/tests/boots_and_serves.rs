@@ -167,11 +167,79 @@ fn start_mock() -> MockUpstream {
 struct Proxy {
     child: Option<Child>,
     port: u16,
+    info_path: std::path::PathBuf,
     tmp: std::path::PathBuf,
 }
 
-/// Boot the real proxy binary with the key on stdin and an ephemeral port,
-/// wait up to 30s for /health.
+/// Boot the proxy keyless in secret-push mode with an ephemeral boot token.
+/// Returns the proxy plus the token so tests can drive the provisioning flow.
+fn boot_proxy_secret_push(upstream_port: u16) -> (Proxy, String) {
+    let tmp =
+        std::env::temp_dir().join(format!("mistral-e2e-sp-{}-{}", process::id(), free_port()));
+    // Remove any stale dir left by a crashed earlier run (pid reuse).
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let info = tmp.join("server.json");
+    let token = "boot-token-0123456789abcdef";
+    // The token travels via a file, never argv: `ps` exposes command lines.
+    let token_path = tmp.join("boot-token");
+    std::fs::write(&token_path, token).unwrap();
+
+    let child = process::Command::new(env!("CARGO_BIN_EXE_codex-mistral-proxy"))
+        .args([
+            "--http-shutdown",
+            "--server-info",
+            info.to_str().unwrap(),
+            "--upstream-base",
+            &format!("http://127.0.0.1:{upstream_port}"),
+            "--secret-channel",
+            "secret-push",
+            "--boot-token-file",
+            token_path.to_str().unwrap(),
+        ])
+        .env_remove("MISTRAL_API_KEY")
+        .stdin(process::Stdio::null())
+        .stdout(process::Stdio::null())
+        .stderr(process::Stdio::null())
+        .spawn()
+        .expect("spawn proxy");
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let port = loop {
+        if let Ok(text) = std::fs::read_to_string(&info) {
+            let port = serde_json::from_str::<serde_json::Value>(&text)
+                .ok()
+                .and_then(|v| v["port"].as_u64())
+                .map(|p| p as u16)
+                .unwrap_or(0);
+            if port != 0 {
+                break port;
+            }
+        }
+        if Instant::now() >= deadline {
+            panic!("proxy did not publish server-info within 30s");
+        }
+        thread::sleep(Duration::from_millis(100));
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        match http(&format!("http://127.0.0.1:{port}/health"), "GET", None) {
+            Ok((status, _)) if status == 200 => break,
+            _ if Instant::now() >= deadline => panic!("proxy never became healthy within 30s"),
+            _ => thread::sleep(Duration::from_millis(100)),
+        }
+    }
+    let proxy = Proxy {
+        child: Some(child),
+        port,
+        info_path: info,
+        tmp,
+    };
+    (proxy, token.to_string())
+}
+
+/// Boot the proxy with the key on stdin.
 fn boot_proxy(upstream_port: u16) -> Proxy {
     let tmp = std::env::temp_dir().join(format!("mistral-e2e-{}-{}", process::id(), free_port()));
     std::fs::create_dir_all(&tmp).unwrap();
@@ -226,6 +294,7 @@ fn boot_proxy(upstream_port: u16) -> Proxy {
     Proxy {
         child: Some(child),
         port,
+        info_path: info,
         tmp,
     }
 }
@@ -243,6 +312,17 @@ impl Drop for Proxy {
 /// Minimal std-only HTTP client. Requests `Connection: close` and reads to
 /// EOF so streaming bodies work without any extra dependency.
 fn http(url: &str, method: &str, body: Option<&str>) -> Result<(u16, String), String> {
+    http_ex(url, method, body, "")
+}
+
+/// `extra_headers` is appended verbatim (each entry must already end with
+/// `\r\n`).
+fn http_ex(
+    url: &str,
+    method: &str,
+    body: Option<&str>,
+    extra_headers: &str,
+) -> Result<(u16, String), String> {
     let rest = url.strip_prefix("http://").unwrap_or(url);
     let (host_port, path) = match rest.split_once('/') {
         Some((h, p)) => (h.to_string(), format!("/{p}")),
@@ -251,6 +331,7 @@ fn http(url: &str, method: &str, body: Option<&str>) -> Result<(u16, String), St
     let mut stream = TcpStream::connect(&host_port).map_err(|e| e.to_string())?;
     stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
     let mut req = format!("{method} {path} HTTP/1.1\r\nHost: {host_port}\r\nConnection: close\r\n");
+    req.push_str(extra_headers);
     match body {
         Some(b) => {
             req.push_str(&format!(
@@ -281,6 +362,150 @@ fn http(url: &str, method: &str, body: Option<&str>) -> Result<(u16, String), St
         .map(|(_, b)| b.to_string())
         .unwrap_or_default();
     Ok((status, body))
+}
+
+#[test]
+fn server_info_advertises_protocol_v1_and_channels() {
+    let mock = start_mock();
+    let proxy = boot_proxy(mock.port);
+    let text = std::fs::read_to_string(&proxy.info_path).expect("server-info file must exist");
+    let info: serde_json::Value = serde_json::from_str(&text).expect("server-info must parse");
+    assert_eq!(info["server_info_version"], 1);
+    assert_eq!(info["protocol_version"], 1);
+    assert_eq!(
+        info["secret_channels"],
+        serde_json::json!(["env-debug", "secret-push"])
+    );
+}
+
+#[test]
+fn secret_push_holds_requests_then_provisions() {
+    let mock = start_mock();
+    let (proxy, _token) = boot_proxy_secret_push(mock.port);
+
+    // The boot-token file must be consumed and deleted by the proxy at
+    // startup: the token exists only in memory from that point on.
+    assert!(
+        !proxy.tmp.join("boot-token").exists(),
+        "boot token file must be removed by the proxy at startup"
+    );
+
+    // Pre-provisioning upstream forwarding returns 503 proxy_secret_pending.
+    let (status, body) = http(
+        &format!("http://127.0.0.1:{}/v1/models", proxy.port),
+        "GET",
+        None,
+    )
+    .unwrap();
+    assert_eq!(status, 503, "pre-provisioning must hold requests");
+    assert!(body.contains("proxy_secret_pending"), "body: {body}");
+
+    // Provisioning without the boot token is rejected.
+    let (status, _body) = http_ex(
+        &format!("http://127.0.0.1:{}/protocol/v1/secrets", proxy.port),
+        "POST",
+        Some(r#"{"channel":"secret-push","key_id":"primary","material":"test-key-abc123"}"#),
+        "",
+    )
+    .unwrap();
+    assert_eq!(status, 401, "missing boot token must be rejected");
+
+    // Valid provisioning returns 204 and unblocks upstream forwarding.
+    let (status, _body) = http_ex(
+        &format!("http://127.0.0.1:{}/protocol/v1/secrets", proxy.port),
+        "POST",
+        Some(r#"{"channel":"secret-push","key_id":"primary","material":"test-key-abc123"}"#),
+        "X-Router-Boot-Token: boot-token-0123456789abcdef\r\n",
+    )
+    .unwrap();
+    assert_eq!(status, 204, "valid provisioning must return 204");
+
+    // Replay is rejected.
+    let (status, _body) = http_ex(
+        &format!("http://127.0.0.1:{}/protocol/v1/secrets", proxy.port),
+        "POST",
+        Some(r#"{"channel":"secret-push","key_id":"primary","material":"another"}"#),
+        "X-Router-Boot-Token: boot-token-0123456789abcdef\r\n",
+    )
+    .unwrap();
+    assert_eq!(status, 409, "replay must be rejected");
+
+    // After provisioning, upstream forwarding works with the pushed key.
+    let (status, _body) = http(
+        &format!("http://127.0.0.1:{}/v1/models", proxy.port),
+        "GET",
+        None,
+    )
+    .unwrap();
+    assert_eq!(status, 200, "post-provisioning must forward");
+}
+
+#[test]
+fn secret_push_rejects_mismatched_channel_payload() {
+    let mock = start_mock();
+    let (proxy, _token) = boot_proxy_secret_push(mock.port);
+
+    let (status, body) = http_ex(
+        &format!("http://127.0.0.1:{}/protocol/v1/secrets", proxy.port),
+        "POST",
+        Some(r#"{"channel":"workload-identity","key_id":"primary","material":"test-key-abc123"}"#),
+        "X-Router-Boot-Token: boot-token-0123456789abcdef\r\n",
+    )
+    .unwrap();
+    assert_eq!(status, 400, "mismatched channel must be rejected");
+    assert!(
+        body.contains("proxy_secret_channel_mismatch"),
+        "body: {body}"
+    );
+
+    // The rejected push must not have provisioned anything.
+    let (status, body) = http(
+        &format!("http://127.0.0.1:{}/v1/models", proxy.port),
+        "GET",
+        None,
+    )
+    .unwrap();
+    assert_eq!(status, 503, "rejected push must leave the proxy keyless");
+    assert!(body.contains("proxy_secret_pending"), "body: {body}");
+}
+
+#[test]
+fn secret_push_trims_padded_material() {
+    let mock = start_mock();
+    let (proxy, _token) = boot_proxy_secret_push(mock.port);
+
+    let (status, _body) = http_ex(
+        &format!("http://127.0.0.1:{}/protocol/v1/secrets", proxy.port),
+        "POST",
+        Some(r#"{"channel":"secret-push","key_id":"primary","material":"  test-key-abc123  "}"#),
+        "X-Router-Boot-Token: boot-token-0123456789abcdef\r\n",
+    )
+    .unwrap();
+    assert_eq!(status, 204, "padded material must be trimmed and accepted");
+
+    let (status, _body) = http(
+        &format!("http://127.0.0.1:{}/v1/models", proxy.port),
+        "GET",
+        None,
+    )
+    .unwrap();
+    assert_eq!(status, 200, "the trimmed key must authenticate upstream");
+}
+
+#[test]
+fn workload_identity_channel_is_rejected_at_startup() {
+    let output = process::Command::new(env!("CARGO_BIN_EXE_codex-mistral-proxy"))
+        .args(["--secret-channel", "workload-identity"])
+        .env_remove("MISTRAL_API_KEY")
+        .stdin(process::Stdio::null())
+        .output()
+        .expect("spawn proxy");
+    assert!(
+        !output.status.success(),
+        "an unimplemented channel must never be advertised or accepted"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("workload-identity"), "stderr: {stderr}");
 }
 
 #[test]

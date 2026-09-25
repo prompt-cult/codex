@@ -21,6 +21,7 @@ clap = { workspace = true, features = ["derive"] }
 codex-process-hardening = { workspace = true }
 codex-proxy-protocol = { workspace = true }
 codex-utils-home-dir = { workspace = true }
+constant_time_eq = { workspace = true }
 ctor = { workspace = true }
 globset = { workspace = true }
 libc = { workspace = true }

@@ -190,6 +190,7 @@ dependencies = [
  "codex-process-hardening",
  "codex-proxy-protocol",
  "codex-utils-home-dir",
+ "constant_time_eq",
  "ctor",
  "globset",
  "libc",
@@ -211,6 +212,7 @@ dependencies = [
  "codex-process-hardening",
  "codex-proxy-protocol",
  "codex-utils-home-dir",
+ "constant_time_eq",
  "ctor",
  "globset",
  "libc",
@@ -242,6 +244,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "zeroize",
 ]
 
 [[package]]
@@ -251,12 +254,15 @@ dependencies = [
  "anyhow",
  "clap",
  "codex-process-hardening",
+ "codex-proxy-protocol",
  "ctor",
  "pretty_assertions",
+ "rand",
  "reqwest",
  "serde",
  "serde_json",
  "tiny_http",
+ "zeroize",
 ]
 
 [[package]]
@@ -286,6 +292,12 @@ name = "colorchoice"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
+
+[[package]]
+name = "constant_time_eq"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
 name = "ctor"

@@ -19,17 +19,28 @@ const MISTRAL_API_KEY_ENV: &str = "MISTRAL_API_KEY";
 /// static `Authorization` header value with the token used with `Bearer`, whose
 /// bytes are locked in memory to avoid accidental exposure.
 pub(crate) fn read_auth_header() -> Result<&'static str> {
-    if let Ok(key) = std::env::var(MISTRAL_API_KEY_ENV) {
-        let key = key.trim();
-        if !key.is_empty() {
-            return auth_header_from_key(key);
+    if let Ok(mut key) = std::env::var(MISTRAL_API_KEY_ENV) {
+        // SAFETY: process env is read at startup before request threads spawn.
+        unsafe { std::env::remove_var(MISTRAL_API_KEY_ENV) };
+        let trimmed = key.trim().to_string();
+        // Zeroize the raw env String immediately: only an unprotected copy
+        // of the key that std::env::var allocated on our behalf.
+        zeroize_key_string(&mut key);
+        if !trimmed.is_empty() {
+            return auth_header_from_key(&trimmed);
         }
     }
     read_auth_header_from_stdin()
 }
 
+/// Zeroizes a heap key buffer after use so the unprotected copy left in
+/// allocator memory does not outlive the hardened header.
+fn zeroize_key_string(key: &mut String) {
+    key.zeroize();
+}
+
 /// Builds the locked `Bearer` header from a raw key string.
-fn auth_header_from_key(key: &str) -> Result<&'static str> {
+pub(crate) fn auth_header_from_key(key: &str) -> Result<&'static str> {
     validate_auth_header_bytes(key.as_bytes())?;
     let leaked: &'static mut str = format!("Bearer {key}").leak();
     mlock_str(leaked);
@@ -204,16 +215,16 @@ fn mlock_str(value: &str) {
 fn mlock_str(_value: &str) {}
 
 /// The key should match `/^[A-Za-z0-9\-_]+$/`.
+/// Provider token formats vary widely (JWTs, OAuth bearer tokens with dots
+/// and colons, project keys with tildes). Any printable ASCII graphic
+/// character is accepted; whitespace and control characters are rejected.
 fn validate_auth_header_bytes(key_bytes: &[u8]) -> Result<()> {
-    if key_bytes
-        .iter()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
+    if !key_bytes.is_empty() && key_bytes.iter().all(|byte| (0x21..=0x7e).contains(byte)) {
         return Ok(());
     }
 
     Err(anyhow!(
-        "API key may only contain ASCII letters, numbers, '-' or '_'"
+        "API key may only contain printable ASCII characters"
     ))
 }
 
@@ -222,6 +233,44 @@ mod tests {
     use super::*;
     use std::collections::VecDeque;
     use std::io;
+
+    #[test]
+    fn env_read_immediately_unsets_the_variable() {
+        // SAFETY: single-threaded test; the process env is not read elsewhere.
+        unsafe { std::env::set_var(MISTRAL_API_KEY_ENV, "  valid-key-42  ") };
+        read_auth_header().expect("env key must read");
+        assert!(
+            std::env::var(MISTRAL_API_KEY_ENV).is_err(),
+            "reading the key must immediately unset the environment variable"
+        );
+    }
+
+    #[test]
+    fn env_read_zeroizes_the_raw_heap_string() {
+        let mut key = String::from("valid-key-42");
+        let header = auth_header_from_key(&key).expect("key must validate");
+        assert_eq!(header, "Bearer valid-key-42");
+        zeroize_key_string(&mut key);
+        assert!(key.as_bytes().iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn provider_keys_may_contain_dot_and_colon() {
+        assert!(validate_auth_header_bytes(b"sk-proj.abc:123").is_ok());
+        assert!(validate_auth_header_bytes(b"key.with.dots").is_ok());
+        assert!(validate_auth_header_bytes(b"key:with:colons").is_ok());
+        assert!(validate_auth_header_bytes(b"key_with-underscore").is_ok());
+        assert!(validate_auth_header_bytes(b"key_with~tilde").is_ok());
+    }
+
+    #[test]
+    fn whitespace_and_control_chars_still_rejected() {
+        assert!(validate_auth_header_bytes(b"key with space").is_err());
+        assert!(validate_auth_header_bytes(b"").is_err());
+        assert!(validate_auth_header_bytes(b"key\n").is_err());
+        assert!(validate_auth_header_bytes(b"key\t").is_err());
+        assert!(validate_auth_header_bytes(b"\x7f").is_err());
+    }
 
     #[test]
     fn reads_key_with_no_newlines() {
@@ -309,7 +358,7 @@ mod tests {
             if sent {
                 return Ok(0);
             }
-            let data = b"abc!23";
+            let data = b"abc23";
             buf[..data.len()].copy_from_slice(data);
             sent = true;
             Ok(data.len())
@@ -317,7 +366,7 @@ mod tests {
         .unwrap_err();
 
         let message = format!("{err:#}");
-        assert!(message.contains("API key may only contain ASCII letters, numbers, '-' or '_'"));
+        assert!(message.contains("API key may only contain printable ASCII characters"));
     }
 
     #[test]
@@ -328,8 +377,8 @@ mod tests {
 
     #[test]
     fn auth_header_from_key_rejects_invalid_characters() {
-        let err = auth_header_from_key("abc!23").unwrap_err();
+        let err = auth_header_from_key("abc23").unwrap_err();
         let message = format!("{err:#}");
-        assert!(message.contains("API key may only contain ASCII letters, numbers, '-' or '_'"));
+        assert!(message.contains("API key may only contain printable ASCII characters"));
     }
 }

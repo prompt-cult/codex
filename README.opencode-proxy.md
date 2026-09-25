@@ -83,21 +83,39 @@ overrides them.
 
 All other paths return 403.
 
-## API KEY
+## API KEY & SECRET SUPPLY
 
-The key is taken from the `OPENCODE_API_KEY` environment variable when set
-(the binary performs no `.env` loading), falling back to stdin via a
-low-level `read(2)`. It is stored in `mlock(2)`-protected memory and
-injected into every upstream request. It is never written to disk.
+The proxy implements Prompt Cult Proxy Protocol v1 (see `docs/proxy-protocol.md`):
+
+1. **`secret-push` mode:** When spawned by `codex-proxy-router` or an orchestrator
+   with `--secret-channel secret-push --boot-token-file <FILE>`, the proxy starts
+   keyless, consumes the boot-token file (zeroized and deleted at startup), and
+   receives the key via an authenticated `POST /protocol/v1/secrets` using the
+   ephemeral single-use boot token.
+2. **`workload-identity` mode:** Not implemented by this proxy; the channel is
+   reserved for commercial proxies that resolve their own credentials. The proxy
+   rejects `--secret-channel workload-identity` at startup and never advertises it.
+3. **`env-debug` / Standalone mode:** For local development and testing, the key
+   is read from the `OPENCODE_API_KEY` environment variable (the proxy unsets the
+   variable immediately upon reading and zeroes the buffer), falling back to stdin
+   via a low-level `read(2)` when run interactively.
+
+The key is stored in `mlock(2)`-protected memory and injected into upstream requests.
+It is never written to disk or logged.
 
 ## SECURITY
 
-- Env-first key read; stdin fallback reads via raw `read(2)` so no
-  `BufReader` retains a copy.
-- The stack buffer holding the raw bytes is zeroized immediately after use.
-- The final `"Bearer <key>"` string is heap-allocated once, then `mlock(2)`'d
-  to prevent it being swapped to disk.
-- The key is validated to contain only `[A-Za-z0-9\-_]` before use.
+- Protocol v1 secret supply: supports direct memory push (`secret-push`) and
+  immediate env-unsetting (`env-debug`); `workload-identity` is deliberately not
+  advertised (see `docs/proxy-protocol.md` section 4.3).
+- In `env-debug` mode, `OPENCODE_API_KEY` is cleared from the process environment
+  (`std::env::remove_var`) immediately upon reading, before validation.
+- Stdin fallback reads via raw `read(2)` so no `BufReader` retains a copy.
+- Buffers holding raw key bytes are zeroized immediately after use.
+- The final `"Bearer <key>"` string is heap-allocated once, then locked via `mlock(2)`
+  to prevent it from being swapped to disk.
+- Key material may be any non-empty run of printable ASCII (0x21–0x7e);
+  whitespace and control characters are rejected.
 
 ## CONFIGURATION
 

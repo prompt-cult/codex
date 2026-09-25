@@ -26,9 +26,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::fs::File;
 use std::io::Read;
-use std::io::Write;
 use std::net::SocketAddr;
 use std::net::TcpListener;
 use std::path::Path;
@@ -46,6 +44,7 @@ use codex_proxy_protocol::LogLevel;
 use codex_proxy_protocol::ProxyDefaults;
 use codex_proxy_protocol::ProxyKind;
 use codex_proxy_protocol::load_config;
+use codex_proxy_protocol::protocol::SecretState;
 use globset::GlobSet;
 use reqwest::Url;
 use reqwest::blocking::Client;
@@ -54,7 +53,6 @@ use reqwest::header::HOST;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderName;
 use reqwest::header::HeaderValue;
-use serde::Serialize;
 use tiny_http::Header;
 use tiny_http::Method;
 use tiny_http::Request;
@@ -62,6 +60,7 @@ use tiny_http::Response;
 use tiny_http::Server;
 use tiny_http::StatusCode;
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 mod anthropic_translate_request;
 mod anthropic_translate_sse;
@@ -153,13 +152,30 @@ pub struct Args {
     /// model listings to `{base}/models`.
     #[arg(long)]
     pub upstream_base: Option<String>,
+
+    /// Secret supply channel (protocol v1). `env-debug` reads the key from
+    /// the environment or stdin at startup; `secret-push` starts keyless and
+    /// waits for the authenticated `POST /protocol/v1/secrets` delivery.
+    /// `workload-identity` is not implemented by this proxy and is rejected
+    /// at startup (it exists for commercial proxies).
+    #[arg(long, value_name = "CHANNEL", default_value = "env-debug")]
+    pub secret_channel: String,
+
+    /// Path to the file holding the ephemeral single-use boot token for
+    /// `--secret-channel secret-push` (protocol v1 section 4.2). The token
+    /// must not be passed on argv (`ps` exposes it); the proxy zeroizes and
+    /// deletes the file at startup. Required in secret-push mode.
+    #[arg(long, value_name = "FILE")]
+    pub boot_token_file: Option<PathBuf>,
 }
 
-#[derive(Serialize)]
-struct ServerInfo {
-    port: u16,
-    pid: u32,
-}
+/// Secret supply channels this proxy executable implements (protocol v1).
+/// `workload-identity` is deliberately absent: this proxy does not resolve
+/// its own credentials, and a false advertisement would defeat negotiation.
+const SECRET_CHANNELS: &[codex_proxy_protocol::protocol::SecretChannel] = &[
+    codex_proxy_protocol::protocol::SecretChannel::EnvDebug,
+    codex_proxy_protocol::protocol::SecretChannel::SecretPush,
+];
 
 struct ProxyConfig {
     /// Which endpoint flavor is being served; drives the log prefix, the
@@ -185,7 +201,26 @@ struct ProxyConfig {
 
 /// Entry point.
 pub fn run_main(args: Args) -> Result<()> {
-    let auth_header = read_auth_header()?;
+    let secret_channel: codex_proxy_protocol::protocol::SecretChannel =
+        serde_json::from_value(serde_json::Value::String(args.secret_channel.clone()))
+            .context("parsing --secret-channel")?;
+    let secret_state = match secret_channel {
+        codex_proxy_protocol::protocol::SecretChannel::SecretPush => {
+            let path = args
+                .boot_token_file
+                .as_ref()
+                .context("--secret-channel secret-push requires --boot-token-file")?;
+            SecretState::pending(codex_proxy_protocol::protocol::read_boot_token_file(path)?)
+        }
+        codex_proxy_protocol::protocol::SecretChannel::EnvDebug => {
+            SecretState::provisioned_at_startup(read_auth_header()?)
+        }
+        codex_proxy_protocol::protocol::SecretChannel::WorkloadIdentity => {
+            anyhow::bail!(
+                "workload-identity is not implemented by this proxy; it must not be advertised"
+            )
+        }
+    };
 
     // CODEX_CONFIG_DIR takes precedence over CODEX_HOME inside
     // find_codex_home; the proxy config lives next to the TUI's config.toml.
@@ -277,7 +312,7 @@ pub fn run_main(args: Args) -> Result<()> {
 
     let (listener, bound_addr) = bind_listener(args.port)?;
     if let Some(path) = args.server_info.as_ref() {
-        write_server_info(path, bound_addr.port())?;
+        write_server_info(path, config.kind, bound_addr.port())?;
     }
     let server = Server::from_listener(listener, None)
         .map_err(|err| anyhow!("creating HTTP server: {err}"))?;
@@ -295,9 +330,11 @@ pub fn run_main(args: Args) -> Result<()> {
     );
 
     let http_shutdown = args.http_shutdown;
+    let secret_state = Arc::new(secret_state);
     for request in server.incoming_requests() {
         let client = client.clone();
         let config = config.clone();
+        let secret_state = secret_state.clone();
         std::thread::spawn(move || {
             let method = request.method().clone();
             let route = classify_route(request.url());
@@ -324,7 +361,7 @@ pub fn run_main(args: Args) -> Result<()> {
                 return;
             }
 
-            if let Err(e) = handle_request(&client, auth_header, &config, request) {
+            if let Err(e) = handle_request(&client, &secret_state, &config, request) {
                 eprintln!("{} error: {e}", config.kind.as_str());
             }
         });
@@ -340,33 +377,68 @@ fn bind_listener(port: Option<u16>) -> Result<(TcpListener, SocketAddr)> {
     Ok((listener, bound))
 }
 
-fn write_server_info(path: &Path, port: u16) -> Result<()> {
+fn write_server_info(path: &Path, kind: ProxyKind, port: u16) -> Result<()> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
         fs::create_dir_all(parent)?;
     }
-    let info = ServerInfo {
+    let info = codex_proxy_protocol::protocol::ServerInfoV1 {
+        server_info_version: 1,
         port,
         pid: std::process::id(),
+        proxy_kind: kind.as_str().to_string(),
+        protocol_version: codex_proxy_protocol::protocol::PROTOCOL_VERSION,
+        secret_channels: codex_proxy_protocol::protocol::SecretChannelList(
+            SECRET_CHANNELS.to_vec(),
+        ),
     };
-    let mut data = serde_json::to_string(&info)?;
-    data.push('\n');
-    let mut f = File::create(path)?;
-    f.write_all(data.as_bytes())?;
+    info.write_to_file(path)?;
     Ok(())
 }
 
 fn handle_request(
     client: &Client,
-    auth_header: &'static str,
+    secret_state: &SecretState,
     config: &ProxyConfig,
     req: Request,
 ) -> Result<()> {
     let method = req.method().clone();
     let url = req.url().to_string();
-    let route = classify_route(&url);
 
+    // Protocol v1 section 4.2: the authenticated direct memory push endpoint.
+    // Handled in every state so post-provisioning replays get their 409.
+    if method == Method::Post
+        && url == codex_proxy_protocol::protocol::SECRETS_ENDPOINT
+        && secret_state.secret_push_mode()
+    {
+        return handle_secret_push(secret_state, req);
+    }
+
+    // Upstream forwarding holds (503) until the key is provisioned.
+    let Some(auth_header) = secret_state.get() else {
+        eprintln!(
+            "{}: 503 proxy_secret_pending for {method} {url}",
+            config.kind.as_str()
+        );
+        let body = serde_json::json!({
+            "error": {
+                "message": "proxy has not been provisioned with its API key yet",
+                "type": "proxy_secret_pending",
+            }
+        });
+        let data = serde_json::to_vec(&body).unwrap_or_default();
+        let resp = Response::from_data(data)
+            .with_status_code(StatusCode(503))
+            .with_header(
+                Header::from_bytes(b"content-type", b"application/json")
+                    .unwrap_or_else(|_| unreachable!()),
+            );
+        let _ = req.respond(resp);
+        return Ok(());
+    };
+
+    let route = classify_route(&url);
     eprintln!("{}: {method} {url} -> {route:?}", config.kind.as_str());
 
     // GET /v1/models — translate the upstream model list into the codex
@@ -384,6 +456,135 @@ fn handle_request(
     if let Err(e) = req.respond(Response::new_empty(StatusCode(403))) {
         eprintln!("{}: failed to respond 403: {e}", config.kind.as_str());
     }
+    Ok(())
+}
+
+/// JSON error response for the secret-push control endpoint.
+fn respond_secret_error(req: Request, status: u16, code: &str, message: &str) -> Result<()> {
+    let body = serde_json::json!({
+        "error": {
+            "message": message,
+            "type": code,
+        }
+    });
+    let data = serde_json::to_vec(&body).unwrap_or_default();
+    let resp = Response::from_data(data)
+        .with_status_code(StatusCode(status))
+        .with_header(
+            Header::from_bytes(b"content-type", b"application/json")
+                .unwrap_or_else(|_| unreachable!()),
+        );
+    let _ = req.respond(resp);
+    Ok(())
+}
+
+/// Protocol v1 section 4.2: ingest the pushed key material into mlock(2)
+/// memory. Authenticated by the ephemeral single-use boot token; the token is
+/// consumed on success so a replay always lands on `409`.
+fn handle_secret_push(secret_state: &SecretState, mut req: Request) -> Result<()> {
+    let Some(expected_token) = secret_state.boot_token() else {
+        // The token was consumed: the secret is provisioned, so this is a
+        // replay, not an authentication failure. Note: this is an
+        // unauthenticated provisioning-state oracle (409 vs 401); it is
+        // documented in the protocol spec and acceptable on loopback-only
+        // bindings because the token is consumed only after successful
+        // provisioning.
+        return respond_secret_error(
+            req,
+            409,
+            "proxy_secret_already_provisioned",
+            "secret already provisioned",
+        );
+    };
+    let supplied =
+        req.headers()
+            .iter()
+            // HTTP header names are case-insensitive; tiny_http preserves the
+            // received casing, so compare case-insensitively.
+            .find(|h| {
+                h.field.as_str().as_bytes().eq_ignore_ascii_case(
+                    codex_proxy_protocol::protocol::BOOT_TOKEN_HEADER.as_bytes(),
+                )
+            })
+            .map(|h| h.value.as_str().to_string());
+    let token_matches = supplied
+        .as_deref()
+        .map(|supplied| {
+            constant_time_eq::constant_time_eq(supplied.as_bytes(), expected_token.as_bytes())
+        })
+        .unwrap_or(false);
+    if !token_matches {
+        return respond_secret_error(
+            req,
+            401,
+            "proxy_secret_unauthorized",
+            "invalid or missing boot token",
+        );
+    }
+
+    if secret_state.get().is_some() {
+        return respond_secret_error(
+            req,
+            409,
+            "proxy_secret_already_provisioned",
+            "secret already provisioned",
+        );
+    }
+
+    let mut body_bytes = Vec::new();
+    req.as_reader().read_to_end(&mut body_bytes)?;
+    let parsed =
+        serde_json::from_slice::<codex_proxy_protocol::protocol::SecretPushPayload>(&body_bytes);
+    body_bytes.zeroize();
+    let mut payload = match parsed {
+        Ok(payload) => payload,
+        Err(_) => {
+            return respond_secret_error(
+                req,
+                400,
+                "proxy_secret_invalid_payload",
+                "secret-push payload is not valid protocol v1 JSON",
+            );
+        }
+    };
+
+    // Only the negotiated channel may be delivered on this endpoint.
+    if payload.channel != codex_proxy_protocol::protocol::SecretChannel::SecretPush {
+        payload.material.zeroize();
+        return respond_secret_error(
+            req,
+            400,
+            "proxy_secret_channel_mismatch",
+            "payload channel does not match the secret-push endpoint",
+        );
+    }
+
+    let mut material = payload.material.trim().to_string();
+    payload.material.zeroize();
+    let header = match read_api_key::auth_header_from_key(&material) {
+        Ok(header) => header,
+        Err(_) => {
+            material.zeroize();
+            return respond_secret_error(
+                req,
+                400,
+                "proxy_secret_invalid_material",
+                "secret material failed validation",
+            );
+        }
+    };
+    material.zeroize();
+
+    if !secret_state.provision_once(header) {
+        return respond_secret_error(
+            req,
+            409,
+            "proxy_secret_already_provisioned",
+            "secret already provisioned",
+        );
+    }
+    secret_state.consume_boot_token();
+    let _ = req.respond(Response::new_empty(StatusCode(204)));
     Ok(())
 }
 

@@ -15,6 +15,7 @@ use globset::GlobSetBuilder;
 use serde::Deserialize;
 
 pub mod models;
+pub mod protocol;
 
 /// Unique, stable identifier for each provider proxy. The string form is the
 /// config filename stem and the log-line prefix; it must never change once a
@@ -185,6 +186,76 @@ fn resolve(
         model_overrides,
         loaded_from,
     })
+}
+
+#[cfg(test)]
+mod protocol_v1_tests {
+    use crate::protocol;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn server_info_v1_serializes_v1_schema() {
+        let info = protocol::ServerInfoV1 {
+            server_info_version: 1,
+            port: 41123,
+            pid: 5678,
+            proxy_kind: "proxy-opencode-zen".to_string(),
+            protocol_version: protocol::PROTOCOL_VERSION,
+            secret_channels: protocol::SecretChannelList(vec![
+                protocol::SecretChannel::EnvDebug,
+                protocol::SecretChannel::SecretPush,
+            ]),
+        };
+        let raw = serde_json::to_string(&info).expect("serialize");
+        assert_eq!(
+            raw,
+            r#"{"server_info_version":1,"port":41123,"pid":5678,"proxy_kind":"proxy-opencode-zen","protocol_version":1,"secret_channels":["env-debug","secret-push"]}"#
+        );
+    }
+
+    #[test]
+    fn server_info_v1_round_trips() {
+        let raw = r#"{"server_info_version":1,"port":41123,"pid":5678,"proxy_kind":"proxy-mistral-ai","protocol_version":1,"secret_channels":["workload-identity"]}"#;
+        let info: protocol::ServerInfoV1 = serde_json::from_str(raw).expect("deserialize");
+        assert_eq!(info.proxy_kind, "proxy-mistral-ai");
+        assert_eq!(
+            info.secret_channels,
+            protocol::SecretChannelList(vec![protocol::SecretChannel::WorkloadIdentity])
+        );
+    }
+
+    #[test]
+    fn unknown_channel_is_ignorable() {
+        // Conforming routers ignore unknown channel names (minor, additive).
+        let raw = r#"{"server_info_version":1,"port":1,"pid":2,"proxy_kind":"x","protocol_version":1,"secret_channels":["workload-identity","quantum-vault"]}"#;
+        let info: protocol::ServerInfoV1 = serde_json::from_str(raw).expect("deserialize");
+        assert_eq!(
+            info.secret_channels,
+            protocol::SecretChannelList(vec![protocol::SecretChannel::WorkloadIdentity])
+        );
+    }
+
+    #[test]
+    fn secret_push_payload_round_trips() {
+        let payload = protocol::SecretPushPayload {
+            channel: protocol::SecretChannel::SecretPush,
+            key_id: "primary".to_string(),
+            material: "sk-test-key".to_string(),
+        };
+        let raw = serde_json::to_string(&payload).expect("serialize");
+        assert_eq!(
+            raw,
+            r#"{"channel":"secret-push","key_id":"primary","material":"sk-test-key"}"#
+        );
+        let back: protocol::SecretPushPayload = serde_json::from_str(&raw).expect("deserialize");
+        assert_eq!(back, payload);
+    }
+
+    #[test]
+    fn protocol_version_must_be_one() {
+        let raw = r#"{"server_info_version":1,"port":1,"pid":2,"proxy_kind":"x","protocol_version":2,"secret_channels":[]}"#;
+        assert!(serde_json::from_str::<protocol::ServerInfoV1>(raw).is_err());
+    }
 }
 
 #[cfg(test)]

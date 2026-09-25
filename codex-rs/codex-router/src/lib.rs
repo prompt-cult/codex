@@ -50,11 +50,115 @@ use tiny_http::Request;
 use tiny_http::Response;
 use tiny_http::Server;
 use tiny_http::StatusCode;
+use zeroize::Zeroize;
 
 mod backend;
 
 use backend::BACKENDS;
 use backend::Backend;
+
+/// Secret supply mode requested by the operator (protocol v1 section 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretMode {
+    EnvDebug,
+    SecretPush,
+    WorkloadIdentity,
+}
+
+impl SecretMode {
+    /// Parses the `--secret-mode` CLI string.
+    pub fn parse(raw: &str) -> Option<SecretMode> {
+        match raw {
+            "env-debug" => Some(SecretMode::EnvDebug),
+            "secret-push" => Some(SecretMode::SecretPush),
+            "workload-identity" => Some(SecretMode::WorkloadIdentity),
+            _ => None,
+        }
+    }
+
+    /// The wire name of this mode's channel.
+    pub fn channel(self) -> codex_proxy_protocol::protocol::SecretChannel {
+        match self {
+            SecretMode::EnvDebug => codex_proxy_protocol::protocol::SecretChannel::EnvDebug,
+            SecretMode::SecretPush => codex_proxy_protocol::protocol::SecretChannel::SecretPush,
+            SecretMode::WorkloadIdentity => {
+                codex_proxy_protocol::protocol::SecretChannel::WorkloadIdentity
+            }
+        }
+    }
+}
+
+/// Non-secret system variables preserved for children in all modes: shell
+/// basics, the codex config dir, TLS roots, and the cloud identity variables
+/// `workload-identity` children need to resolve their own credentials.
+const SAFE_ENV: &[&str] = &[
+    "PATH",
+    "HOME",
+    "USER",
+    "TMPDIR",
+    "LANG",
+    "CODEX_CONFIG_DIR",
+    "CODEX_HOME",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "KUBERNETES_SERVICE_HOST",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "VAULT_ADDR",
+];
+
+/// Environment variable names that must never reach a child's environment
+/// outside `env-debug` mode.
+const SECRET_ENV: &[&str] = &["OPENCODE_API_KEY", "MISTRAL_API_KEY"];
+
+/// Filters `env` down to the safe non-secret set (protocol v1 section 4.3).
+/// Applied in every mode: in `env-debug` the per-backend allow-list of secret
+/// names is layered on top by the caller, so debug children still get shell
+/// basics and TLS roots.
+fn sanitize_env(
+    env: &std::collections::HashMap<String, String>,
+) -> std::collections::HashMap<String, String> {
+    env.iter()
+        .filter(|(name, _)| {
+            SAFE_ENV.contains(&name.as_str()) && !SECRET_ENV.contains(&name.as_str())
+        })
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
+}
+
+/// Negotiates the secret supply channel between the operator's requested
+/// mode and the child's capability advertisement. Returns an error naming
+/// both sides when there is no intersection.
+fn negotiate_channel(
+    requested: SecretMode,
+    child_channels: &[codex_proxy_protocol::protocol::SecretChannel],
+) -> Result<codex_proxy_protocol::protocol::SecretChannel> {
+    let want = requested.channel();
+    if child_channels.contains(&want) {
+        return Ok(want);
+    }
+    let child_names: Vec<String> = child_channels
+        .iter()
+        .map(|channel| match channel {
+            codex_proxy_protocol::protocol::SecretChannel::EnvDebug => "env-debug".to_string(),
+            codex_proxy_protocol::protocol::SecretChannel::SecretPush => "secret-push".to_string(),
+            codex_proxy_protocol::protocol::SecretChannel::WorkloadIdentity => {
+                "workload-identity".to_string()
+            }
+        })
+        .collect();
+    let requested_name = match requested {
+        SecretMode::EnvDebug => "env-debug",
+        SecretMode::SecretPush => "secret-push",
+        SecretMode::WorkloadIdentity => "workload-identity",
+    };
+    anyhow::bail!(
+        "child does not support the requested secret mode {requested_name}; child advertises [{}]",
+        child_names.join(", "),
+    );
+}
 
 /// How long a child proxy may take to publish its server-info before the
 /// dispatcher gives up at startup.
@@ -78,6 +182,14 @@ pub struct Args {
     /// Enable HTTP shutdown endpoint at GET /shutdown.
     #[arg(long)]
     pub http_shutdown: bool,
+
+    /// Secret supply channel to negotiate with child proxies (protocol v1):
+    /// `secret-push` (production; keys pushed to children over authenticated
+    /// loopback, never in environ), `workload-identity` (children resolve
+    /// secrets themselves), or `env-debug` (local testing only; copies API
+    /// keys into child environments). See `docs/proxy-protocol.md`.
+    #[arg(long, value_name = "MODE", default_value = "secret-push")]
+    pub secret_mode: String,
 }
 
 #[derive(Serialize)]
@@ -152,6 +264,13 @@ fn classify(raw_url: &str) -> Route {
         let Some(rest) = path.strip_prefix(backend.prefix) else {
             continue;
         };
+        // The protocol control plane is child-local: a router client must
+        // never be able to reach a child's secrets endpoint. The trailing-
+        // slash variant is blocked too (defense in depth).
+        let control_plane = codex_proxy_protocol::protocol::SECRETS_ENDPOINT;
+        if rest == control_plane || rest.strip_suffix('/') == Some(control_plane) {
+            return Route::Unknown;
+        }
         if rest.is_empty() || rest.starts_with('/') {
             let mut remainder = if rest.is_empty() {
                 "/".to_string()
@@ -170,15 +289,25 @@ fn classify(raw_url: &str) -> Route {
 
 /// Entry point.
 pub fn run_main(args: Args) -> Result<()> {
+    let secret_mode = SecretMode::parse(&args.secret_mode)
+        .with_context(|| format!("invalid --secret-mode {:?}", args.secret_mode))?;
     let exe_dir = std::env::current_exe()
         .context("resolving own path")?
         .parent()
         .map(Path::to_path_buf)
         .context("resolving own directory")?;
 
+    if secret_mode == SecretMode::EnvDebug {
+        eprintln!(
+            "WARNING: --secret-mode env-debug copies API keys into child process \
+             environments; readable via /proc/<pid>/environ and core dumps. \
+             Local testing only."
+        );
+    }
+
     let children = BACKENDS
         .iter()
-        .map(|backend| boot_child(backend, &exe_dir))
+        .map(|backend| boot_child(backend, &exe_dir, secret_mode))
         .collect::<Result<Vec<_>>>()?;
 
     let (listener, listener_addr) = bind_listener(args.port)?;
@@ -254,12 +383,18 @@ fn reap_failed_boot(child: &mut Child, tmp_dir: &std::path::Path) {
 
 /// Boots one backend child proxy from its sibling executable.
 ///
-/// The child's environment is sanitized to the backend's allow-list: only
-/// names listed in `allowed_env` that exist (non-empty) in the dispatcher's
-/// own environment are inherited, opaquely. stdin is closed so a child that
-/// cannot resolve its key from its vault fails fast instead of blocking. If
-/// the boot does not complete, the child is reaped and its temp dir removed.
-fn boot_child(backend: &'static Backend, exe_dir: &Path) -> Result<ChildProxy> {
+/// The child's environment is sanitized to the safe non-secret set plus, in
+/// `env-debug` mode only, the backend's allow-listed secret names (existing
+/// and non-empty, copied opaquely). In `secret-push` mode the boot token is
+/// delivered via a 0600 file and the key is pushed over authenticated
+/// loopback after boot. stdin is closed so a child that cannot resolve its
+/// key fails fast instead of blocking. If the boot does not complete, the
+/// child is reaped and its temp dir removed.
+fn boot_child(
+    backend: &'static Backend,
+    exe_dir: &Path,
+    secret_mode: SecretMode,
+) -> Result<ChildProxy> {
     let exe_path = exe_dir.join(backend.binary);
     anyhow::ensure!(
         exe_path.is_file(),
@@ -277,19 +412,53 @@ fn boot_child(backend: &'static Backend, exe_dir: &Path) -> Result<ChildProxy> {
     fs::create_dir_all(&tmp_dir)
         .with_context(|| format!("creating temp dir {}", tmp_dir.display()))?;
     let info_path = tmp_dir.join("server.json");
+    let token_path = tmp_dir.join("boot-token");
+    let mut boot_token = generate_boot_token();
 
+    let own_env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let mut cmd = Command::new(&exe_path);
     cmd.args(["--http-shutdown", "--server-info"])
         .arg(&info_path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .env_clear();
-    for name in backend.allowed_env {
-        if let Ok(value) = std::env::var(name)
-            && !value.is_empty()
-        {
-            cmd.env(name, value);
+        .stderr(Stdio::inherit());
+    match secret_mode {
+        SecretMode::EnvDebug => {
+            // Local testing only: the safe non-secret system set plus the
+            // backend's allow-listed secret names, copied opaquely.
+            cmd.env_clear();
+            for (name, value) in sanitize_env(&own_env) {
+                cmd.env(name, value);
+            }
+            for name in backend.allowed_env {
+                if let Some(value) = own_env.get(*name)
+                    && !value.is_empty()
+                {
+                    cmd.env(*name, value);
+                }
+            }
+        }
+        SecretMode::SecretPush => {
+            // Production: child boots keyless; the key is pushed after boot.
+            // Safe system env only; secrets never enter the child environ.
+            // The boot token is delivered via a 0600 file, never argv: `ps`
+            // exposes command lines to every local user.
+            cmd.env_clear();
+            for (name, value) in sanitize_env(&own_env) {
+                cmd.env(name, value);
+            }
+            write_boot_token_file(&token_path, &boot_token)
+                .with_context(|| format!("writing boot token to {}", token_path.display()))?;
+            cmd.arg("--secret-channel").arg("secret-push");
+            cmd.arg("--boot-token-file").arg(&token_path);
+        }
+        SecretMode::WorkloadIdentity => {
+            // Children resolve their own credentials via platform identity.
+            cmd.env_clear();
+            for (name, value) in sanitize_env(&own_env) {
+                cmd.env(name, value);
+            }
+            cmd.arg("--secret-channel").arg("workload-identity");
         }
     }
     let mut child = match cmd.spawn() {
@@ -306,7 +475,7 @@ fn boot_child(backend: &'static Backend, exe_dir: &Path) -> Result<ChildProxy> {
             Ok(Some(status)) => {
                 reap_failed_boot(&mut child, &tmp_dir);
                 anyhow::bail!(
-                    "{} exited early with {status} before publishing server-info; it could not obtain its API key",
+                    "{} exited early with {status} before publishing server-info",
                     backend.binary
                 );
             }
@@ -317,13 +486,49 @@ fn boot_child(backend: &'static Backend, exe_dir: &Path) -> Result<ChildProxy> {
             }
         }
         if let Ok(text) = fs::read_to_string(&info_path) {
-            let port = serde_json::from_str::<serde_json::Value>(&text)
-                .ok()
-                .and_then(|v| v["port"].as_u64())
-                .map(|p| p as u16)
-                .unwrap_or(0);
-            if port != 0 {
-                break port;
+            match serde_json::from_str::<codex_proxy_protocol::protocol::ServerInfoV1>(&text) {
+                Ok(info) => {
+                    // Protocol v1 negotiation: reject an incompatible
+                    // advertisement and complete the secret supply channel
+                    // before declaring ready.
+                    negotiate_channel(secret_mode, &info.secret_channels.0).inspect_err(
+                        |_err| {
+                            reap_failed_boot(&mut child, &tmp_dir);
+                        },
+                    )?;
+                    if secret_mode == SecretMode::SecretPush {
+                        let delivery = deliver_secret_push(backend, info.port, &boot_token);
+                        // The router's copy of the token is spent regardless
+                        // of the delivery outcome.
+                        boot_token.zeroize();
+                        delivery.inspect_err(|_err| {
+                            reap_failed_boot(&mut child, &tmp_dir);
+                        })?;
+                    }
+                    break info.port;
+                }
+                Err(_) => {
+                    // A fully written server-info naming an unsupported
+                    // protocol version must fail loudly instead of silently
+                    // burning the boot timeout. A partial write keeps polling.
+                    let advertised_version = serde_json::from_str::<serde_json::Value>(&text)
+                        .ok()
+                        .and_then(|value| {
+                            value
+                                .get("protocol_version")
+                                .and_then(serde_json::Value::as_u64)
+                        });
+                    if let Some(version) = advertised_version
+                        && version != u64::from(codex_proxy_protocol::protocol::PROTOCOL_VERSION)
+                    {
+                        reap_failed_boot(&mut child, &tmp_dir);
+                        anyhow::bail!(
+                            "{} advertised protocol_version {version}; this router implements {}; refusing to boot",
+                            backend.binary,
+                            codex_proxy_protocol::protocol::PROTOCOL_VERSION,
+                        );
+                    }
+                }
             }
         }
         if Instant::now() >= deadline {
@@ -344,6 +549,80 @@ fn boot_child(backend: &'static Backend, exe_dir: &Path) -> Result<ChildProxy> {
     })
 }
 
+/// Generates an ephemeral single-use boot token for the secret-push channel
+/// (protocol v1 section 4.2): 256 bits from the operating system's
+/// cryptographically secure random source, hex-encoded.
+fn generate_boot_token() -> String {
+    use rand::Rng;
+    let bytes: [u8; 32] = rand::rng().random();
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Writes the boot token to a 0600 file inside the child's temp directory
+/// (protocol v1 section 4.2): the token must never travel on argv, where
+/// `ps` exposes it to every local user.
+fn write_boot_token_file(path: &Path, token: &str) -> Result<()> {
+    #[cfg(unix)]
+    let mut file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .mode(0o600)
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(path)?
+    };
+    #[cfg(not(unix))]
+    let mut file = File::create(path)?;
+    file.write_all(token.as_bytes())?;
+    Ok(())
+}
+
+/// Pushes the backend's key material to the child's authenticated
+/// `POST /protocol/v1/secrets` endpoint (protocol v1 section 4.2). The key
+/// never enters any process environment.
+fn deliver_secret_push(backend: &'static Backend, port: u16, boot_token: &str) -> Result<()> {
+    let material = backend
+        .allowed_env
+        .first()
+        .and_then(|name| std::env::var(name).ok())
+        .filter(|value| !value.is_empty())
+        .with_context(|| {
+            format!(
+                "secret-push mode requires {} in the router's environment",
+                backend.allowed_env[0]
+            )
+        })?;
+    let payload = codex_proxy_protocol::protocol::SecretPushPayload {
+        channel: codex_proxy_protocol::protocol::SecretChannel::SecretPush,
+        key_id: backend.label.to_string(),
+        material,
+    };
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .context("building secret-push client")?;
+    let response = client
+        .post(format!(
+            "http://127.0.0.1:{port}{}",
+            codex_proxy_protocol::protocol::SECRETS_ENDPOINT
+        ))
+        .header(
+            codex_proxy_protocol::protocol::BOOT_TOKEN_HEADER,
+            boot_token,
+        )
+        .json(&payload)
+        .send()
+        .context("pushing secret to child")?;
+    anyhow::ensure!(
+        response.status().as_u16() == 204,
+        "secret push to {} returned {}; child rejected the provisioning",
+        backend.binary,
+        response.status()
+    );
+    Ok(())
+}
+
 fn bind_listener(port: Option<u16>) -> Result<(TcpListener, std::net::SocketAddr)> {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port.unwrap_or(0)));
     let listener = TcpListener::bind(addr).with_context(|| format!("failed to bind {addr}"))?;
@@ -357,14 +636,20 @@ fn write_server_info(path: &Path, port: u16) -> Result<()> {
     {
         fs::create_dir_all(parent)?;
     }
+    // Atomic write: a sibling temp file is renamed over the destination so a
+    // poller never observes a partially written server-info file.
     let info = ServerInfo {
         port,
         pid: std::process::id(),
     };
     let mut data = serde_json::to_string(&info)?;
     data.push('\n');
-    let mut f = File::create(path)?;
-    f.write_all(data.as_bytes())?;
+    let tmp_path = path.with_extension("tmp");
+    {
+        let mut f = File::create(&tmp_path)?;
+        f.write_all(data.as_bytes())?;
+    }
+    fs::rename(&tmp_path, path)?;
     Ok(())
 }
 
@@ -551,6 +836,109 @@ fn relay_response(req: Request, upstream_resp: reqwest::blocking::Response) -> R
 }
 
 #[cfg(test)]
+mod negotiation_tests {
+    use super::*;
+    use codex_proxy_protocol::protocol::SecretChannel;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn env_debug_negotiates_when_child_advertises_it() {
+        let channel = negotiate_channel(
+            SecretMode::EnvDebug,
+            &[SecretChannel::EnvDebug, SecretChannel::SecretPush],
+        )
+        .expect("env-debug must negotiate");
+        assert_eq!(channel, SecretChannel::EnvDebug);
+    }
+
+    #[test]
+    fn secret_push_negotiates_when_child_advertises_it() {
+        let channel = negotiate_channel(
+            SecretMode::SecretPush,
+            &[SecretChannel::SecretPush, SecretChannel::WorkloadIdentity],
+        )
+        .expect("secret-push must negotiate");
+        assert_eq!(channel, SecretChannel::SecretPush);
+    }
+
+    #[test]
+    fn workload_identity_negotiates_when_child_advertises_it() {
+        let channel = negotiate_channel(
+            SecretMode::WorkloadIdentity,
+            &[SecretChannel::WorkloadIdentity],
+        )
+        .expect("workload-identity must negotiate");
+        assert_eq!(channel, SecretChannel::WorkloadIdentity);
+    }
+
+    #[test]
+    fn commercial_identity_only_proxy_fails_env_debug_negotiation() {
+        // A commercial proxy shipping only workload-identity must refuse to
+        // boot under env-debug; the router kills it with a named error.
+        let err = negotiate_channel(SecretMode::EnvDebug, &[SecretChannel::WorkloadIdentity])
+            .expect_err("no intersection must fail");
+        let message = format!("{err:#}");
+        assert!(message.contains("env-debug"), "message: {message}");
+        assert!(message.contains("workload-identity"), "message: {message}");
+    }
+
+    #[test]
+    fn unknown_mode_string_is_rejected() {
+        assert!(SecretMode::parse("quantum-vault").is_none());
+        assert_eq!(SecretMode::parse("env-debug"), Some(SecretMode::EnvDebug));
+        assert_eq!(
+            SecretMode::parse("secret-push"),
+            Some(SecretMode::SecretPush)
+        );
+        assert_eq!(
+            SecretMode::parse("workload-identity"),
+            Some(SecretMode::WorkloadIdentity)
+        );
+    }
+
+    #[test]
+    fn env_sanitize_preserves_safe_system_vars_and_strips_secrets() {
+        let env: std::collections::HashMap<String, String> = [
+            ("PATH".to_string(), "/usr/bin".to_string()),
+            ("HOME".to_string(), "/home/dev".to_string()),
+            (
+                "CODEX_CONFIG_DIR".to_string(),
+                "/home/dev/.codex".to_string(),
+            ),
+            ("SSL_CERT_FILE".to_string(), "/etc/ssl/cert.pem".to_string()),
+            ("AWS_REGION".to_string(), "eu-west-1".to_string()),
+            ("OPENCODE_API_KEY".to_string(), "sk-leaky".to_string()),
+            ("MISTRAL_API_KEY".to_string(), "sk-leaky".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let sanitized = sanitize_env(&env);
+        assert_eq!(sanitized.get("PATH").map(String::as_str), Some("/usr/bin"));
+        assert_eq!(sanitized.get("HOME").map(String::as_str), Some("/home/dev"));
+        assert_eq!(
+            sanitized.get("CODEX_CONFIG_DIR").map(String::as_str),
+            Some("/home/dev/.codex")
+        );
+        assert_eq!(
+            sanitized.get("SSL_CERT_FILE").map(String::as_str),
+            Some("/etc/ssl/cert.pem")
+        );
+        assert_eq!(
+            sanitized.get("AWS_REGION").map(String::as_str),
+            Some("eu-west-1")
+        );
+        assert!(
+            !sanitized.contains_key("OPENCODE_API_KEY"),
+            "secret must be stripped"
+        );
+        assert!(
+            !sanitized.contains_key("MISTRAL_API_KEY"),
+            "secret must be stripped"
+        );
+    }
+}
+
+#[cfg(test)]
 mod classify_tests {
     use super::*;
     use pretty_assertions::assert_eq;
@@ -593,6 +981,24 @@ mod classify_tests {
     #[test]
     fn similar_prefixes_do_not_match() {
         assert_eq!(classify("/opencode.ai.evil.com/v1"), Route::Unknown);
+    }
+
+    #[test]
+    fn child_control_plane_is_not_forwardable() {
+        // A router client must never reach a child's secrets endpoint.
+        assert_eq!(classify("/opencode.ai/protocol/v1/secrets"), Route::Unknown);
+        assert_eq!(classify("/mistral.ai/protocol/v1/secrets"), Route::Unknown);
+        // The bare endpoint itself is also never a backend route.
+        assert_eq!(classify("/protocol/v1/secrets"), Route::Unknown);
+        // Trailing-slash variants are blocked too (defense in depth).
+        assert_eq!(
+            classify("/opencode.ai/protocol/v1/secrets/"),
+            Route::Unknown
+        );
+        assert_eq!(
+            classify("/mistral.ai/protocol/v1/secrets/?x=1"),
+            Route::Unknown
+        );
     }
 
     #[test]

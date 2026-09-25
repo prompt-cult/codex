@@ -19,11 +19,15 @@ workspace = true
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive"] }
 codex-process-hardening.workspace = true
+codex-proxy-protocol.workspace = true
 ctor.workspace = true
+rand.workspace = true
 reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tiny_http.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 pretty_assertions.workspace = true
+serde_json.workspace = true

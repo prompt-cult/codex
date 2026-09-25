@@ -8,14 +8,22 @@ every future proxy.
 A standalone translating proxy that lets a keyless harness talk to the
 Mistral AI API. It speaks the OpenAI Responses API on the loopback side
 (what a harness with `api_style = "openai-responses"` sends) and the
-Mistral Chat Completions API upstream. The API key is read from the
-`MISTRAL_API_KEY` environment variable (falling back to stdin) into
-`mlock(2)`-protected memory and injected into upstream requests; the proxy
-is never auto-spawned by the harness — you boot it yourself, e.g. as a
-Docker sidecar. It can also be booted for you by `codex-proxy-router`
-(see `README.proxy-router.md` at the repo root), which boots it as a child
-with only allow-listed environment variable names in its environment; the
-dispatcher never sees the secret.
+Mistral Chat Completions API upstream. The proxy implements Prompt Cult
+Proxy Protocol v1 (see `docs/proxy-protocol.md`) with two secret supply
+channels: `secret-push` (keyless boot; the key arrives via authenticated
+`POST /protocol/v1/secrets` with an ephemeral single-use boot token delivered
+as a 0600 file, never argv) and `env-debug`/standalone (the key read from the
+`MISTRAL_API_KEY` environment variable, which is immediately unset upon
+reading, or stdin when run interactively). `workload-identity` is not
+implemented and never advertised — the channel is reserved for commercial
+proxies that resolve their own credentials. The key lands in `mlock(2)`-
+protected memory and is injected into upstream requests; it is never written
+to disk or logged.
+The proxy is never auto-spawned by the harness — you boot it yourself, e.g.
+as a Docker sidecar. It can also be booted for you by `codex-proxy-router`
+(see `README.proxy-router.md` at the repo root), which negotiates the secret
+supply channel at boot per the protocol; the dispatcher never sees the
+secret outside `env-debug` mode.
 
 Mistral-only by design: there is no model-family routing, so any model Mistral
 exposes now or in the future works automatically.
